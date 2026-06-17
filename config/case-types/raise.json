@@ -1,0 +1,568 @@
+{
+  "caseType": "Raise",
+  "description": "High-quality answer criteria for the Raise Getting Started interview.",
+  "primaryQuestions": [
+    {
+      "id": "raise_q1_amount_timing",
+      "discussionArea": "Raise Amount & Timing",
+      "question": "What exactly are you asking for?",
+      "answerGuidance": [
+        "Specific raise amount/range/percent",
+        "Other types of compensation",
+        "Approximate date you want change to take effect"
+      ],
+      "highQualityCriteria": [
+        {
+          "requirement": "Clearly states a specific raise amount, range, or percentage and/or other types of compensation being requested.",
+          "required": true,
+          "label": "Objective Facts",
+          "id": "raise_q1_amount_timing_criterion_1",
+          "termIds": [
+            "compensation_amount",
+            "compensation_type"
+          ]
+        },
+        {
+          "requirement": "Provides a specific approximate effective date for the compensation change.",
+          "required": true,
+          "label": "Objective Facts",
+          "id": "raise_q1_amount_timing_criterion_2",
+          "termIds": [
+            "compensation_type",
+            "timing"
+          ]
+        },
+        {
+          "requirement": "Distinguishes between different components of compensation being requested.",
+          "required": false,
+          "label": "Objective Facts",
+          "id": "raise_q1_amount_timing_criterion_3",
+          "termIds": [
+            "compensation_type"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "100%",
+      "primaryTermId": "compensation_amount"
+    },
+    {
+      "id": "raise_q2_justification",
+      "discussionArea": "Raise Justification",
+      "question": "Why do you believe this raise request is justified?",
+      "answerGuidance": [
+        "Cite specific results delivered/impact to organization",
+        "Cite specific new/changed responsibilities that require a raise",
+        "Cite market data that shows current compensation is below market rate",
+        "Other examples: length of time since last raise"
+      ],
+      "highQualityCriteria": [
+        {
+          "requirement": "Cites specific reason(s) why the compensation change is justified.",
+          "required": true,
+          "label": "Objective Facts, Subjective Facts",
+          "id": "raise_q2_justification_criterion_1",
+          "termIds": [
+            "compensation_type"
+          ]
+        },
+        {
+          "requirement": "For each reason, provides concrete details, evidence, and/or examples that substantiate the claim.",
+          "required": true,
+          "label": "Objective Facts, Subjective Facts, Examples, Evidence",
+          "id": "raise_q2_justification_criterion_2",
+          "termIds": [
+            "performance_justification",
+            "compensation_amount",
+            "compensation_type",
+            "timing"
+          ]
+        },
+        {
+          "requirement": "For each reason, explains the positive impact on the employee's value to the organization.",
+          "required": false,
+          "label": "Objective Facts, Subjective Facts, Examples, Evidence",
+          "id": "raise_q2_justification_criterion_3",
+          "termIds": [
+            "compensation_amount",
+            "performance_justification",
+            "fairness_market_fit"
+          ]
+        },
+        {
+          "requirement": "For each reason, explains the positive impact on the organization.",
+          "required": false,
+          "label": "Objective Facts, Subjective Facts, Examples, Evidence",
+          "id": "raise_q2_justification_criterion_4",
+          "termIds": [
+            "performance_justification",
+            "fairness_market_fit"
+          ]
+        },
+        {
+          "requirement": "Cites a specific reason why the proposed effective date is justified.",
+          "required": true,
+          "label": "Objective Facts, Subjective Facts",
+          "id": "raise_q2_justification_criterion_5",
+          "termIds": [
+            "timing"
+          ]
+        },
+        {
+          "requirement": "Distinguishes between different types of justification, such as performance-based, market-based, and role-based.",
+          "required": true,
+          "label": "Objective Facts, Subjective Facts, Examples, Evidence",
+          "id": "raise_q2_justification_criterion_6",
+          "termIds": [
+            "compensation_type",
+            "performance_justification",
+            "fairness_market_fit"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "performance_justification"
+    },
+    {
+      "id": "raise_q3_fairness",
+      "discussionArea": "Fairness & Organizational Fit",
+      "question": "What makes this request feel fair in the context of your team or organization?",
+      "answerGuidance": [
+        "Aligned with organization compensation policies: timing, pay bands, review protocols",
+        "Would not put undue stress on the budget of the organization",
+        "Would be perceived as equitable and consistent with peers",
+        "Fits within market rates for the role within the geographic area"
+      ],
+      "highQualityCriteria": [
+        {
+          "requirement": "Provides one or more positions or arguments for why the raise request is fair.",
+          "required": true,
+          "label": "Objective Facts, Subjective Facts",
+          "id": "raise_q3_fairness_criterion_1",
+          "termIds": [
+            "compensation_amount",
+            "fairness_market_fit"
+          ]
+        },
+        {
+          "requirement": "Provides one or more positions or arguments for why the proposed effective date is fair.",
+          "required": true,
+          "label": "Objective Facts, Subjective Facts, Examples, Evidence",
+          "id": "raise_q3_fairness_criterion_2",
+          "termIds": [
+            "timing",
+            "fairness_market_fit"
+          ]
+        },
+        {
+          "requirement": "For each position or argument cited, provides supporting details, evidence, or examples.",
+          "required": true,
+          "label": "Objective Facts, Subjective Facts, Examples, Evidence",
+          "id": "raise_q3_fairness_criterion_3",
+          "termIds": [
+            "fairness_market_fit"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "Not applicable; all criteria are mandatory.",
+      "primaryTermId": "fairness_market_fit"
+    },
+    {
+      "id": "raise_q4_work_performance",
+      "discussionArea": "Work Performance",
+      "question": "Describe your work performance.",
+      "answerGuidance": [
+        "What are the main goals for your role?",
+        "How have you performed against these goals?",
+        "Provide specific details supporting performance, such as achievements, metrics, new skills, and difficult situations",
+        "Areas working to improve"
+      ],
+      "highQualityCriteria": [
+        {
+          "requirement": "Clearly lists and describes each goal the organization has assigned to the role.",
+          "required": true,
+          "label": "Objective Facts, Subjective Facts",
+          "id": "raise_q4_work_performance_criterion_1",
+          "termIds": [
+            "fairness_market_fit"
+          ]
+        },
+        {
+          "requirement": "For each goal, defines the target expectation and timeframe.",
+          "required": true,
+          "label": "Objective Facts",
+          "id": "raise_q4_work_performance_criterion_2",
+          "termIds": [
+            "performance_justification"
+          ]
+        },
+        {
+          "requirement": "For each goal, states actual results achieved.",
+          "required": true,
+          "label": "Objective Facts, Subjective Facts",
+          "id": "raise_q4_work_performance_criterion_3",
+          "termIds": [
+            "performance_justification"
+          ]
+        },
+        {
+          "requirement": "For each goal, provides evidence supporting results, such as metrics, manager feedback, or customer quotes.",
+          "required": false,
+          "label": "Objective Facts, Subjective Facts, Examples, Evidence",
+          "id": "raise_q4_work_performance_criterion_4",
+          "termIds": [
+            "performance_justification"
+          ]
+        },
+        {
+          "requirement": "For each goal, describes how the results support the raise request.",
+          "required": true,
+          "label": "Objective Facts, Subjective Facts, Examples, Evidence",
+          "id": "raise_q4_work_performance_criterion_5",
+          "termIds": [
+            "compensation_amount",
+            "performance_justification"
+          ]
+        },
+        {
+          "requirement": "Clearly lists and describes one or more new skills acquired and how each impacted work performance.",
+          "required": false,
+          "label": "Objective Facts, Subjective Facts, Examples, Evidence",
+          "id": "raise_q4_work_performance_criterion_6",
+          "termIds": [
+            "performance_justification"
+          ]
+        },
+        {
+          "requirement": "Cites one or more difficult work situations and explains the impact on work and the organization.",
+          "required": false,
+          "label": "Objective Facts, Subjective Facts, Examples, Evidence",
+          "id": "raise_q4_work_performance_criterion_7",
+          "termIds": [
+            "performance_justification",
+            "fairness_market_fit"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "33%",
+      "primaryTermId": "performance_justification"
+    },
+    {
+      "id": "raise_q5_professionalism",
+      "discussionArea": "Professionalism & Collaboration",
+      "question": "How would you describe your professionalism?",
+      "answerGuidance": [
+        "Communication with co-workers, customers, and management",
+        "Reliability and commitment to team and outcomes",
+        "Attitude within the work environment",
+        "Respectfulness of others"
+      ],
+      "highQualityCriteria": [
+        {
+          "requirement": "Highlights one or more interactions with co-workers that demonstrate professionalism and communication style.",
+          "required": true,
+          "label": "Subjective Facts, Examples",
+          "id": "raise_q5_professionalism_criterion_1",
+          "termIds": [
+            "performance_justification",
+            "fairness_market_fit"
+          ]
+        },
+        {
+          "requirement": "Highlights one or more interactions in a team environment that demonstrate professionalism and communication style.",
+          "required": false,
+          "label": "Subjective Facts, Examples",
+          "id": "raise_q5_professionalism_criterion_2",
+          "termIds": [
+            "performance_justification",
+            "fairness_market_fit"
+          ]
+        },
+        {
+          "requirement": "Highlights one or more interactions with management that demonstrate professionalism and communication style.",
+          "required": false,
+          "label": "Subjective Facts, Examples",
+          "id": "raise_q5_professionalism_criterion_3",
+          "termIds": [
+            "performance_justification",
+            "fairness_market_fit"
+          ]
+        },
+        {
+          "requirement": "Highlights one or more interactions with outside stakeholders.",
+          "required": false,
+          "label": "Subjective Facts, Examples",
+          "id": "raise_q5_professionalism_criterion_4",
+          "termIds": [
+            "performance_justification"
+          ]
+        },
+        {
+          "requirement": "For each interaction, details how the approach impacted the other parties and the organization.",
+          "required": true,
+          "label": "Subjective Facts, Examples, Evidence",
+          "id": "raise_q5_professionalism_criterion_5",
+          "termIds": [
+            "performance_justification",
+            "fairness_market_fit"
+          ]
+        },
+        {
+          "requirement": "Provides an example where professionalism or communication improved performance, an outcome, or organizational objectives.",
+          "required": false,
+          "label": "Examples",
+          "id": "raise_q5_professionalism_criterion_6",
+          "termIds": [
+            "performance_justification",
+            "fairness_market_fit"
+          ]
+        },
+        {
+          "requirement": "Describes professionalism and communication attributes that contribute to productivity and organizational success.",
+          "required": false,
+          "label": "Subjective Facts, Examples",
+          "id": "raise_q5_professionalism_criterion_7",
+          "termIds": [
+            "performance_justification",
+            "fairness_market_fit"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "60%",
+      "primaryTermId": "performance_justification"
+    },
+    {
+      "id": "raise_q6_constraints",
+      "discussionArea": "Constraints",
+      "question": "What constraints do you realistically expect could affect this decision?",
+      "answerGuidance": [
+        "Organization policy limitations or violations",
+        "Approval layers and timing limitations",
+        "Budget constraints",
+        "Peer equity perception",
+        "Limited visibility by management"
+      ],
+      "highQualityCriteria": [
+        {
+          "requirement": "Lists one or more constraints that may impact the compensation decision.",
+          "required": true,
+          "label": "Details, Objective Facts",
+          "id": "raise_q6_constraints_criterion_1",
+          "termIds": [
+            "compensation_type",
+            "performance_justification",
+            "flexibility_constraints"
+          ]
+        },
+        {
+          "requirement": "For each listed constraint, describes the constraint in detail.",
+          "required": true,
+          "label": "Details, Objective Facts, Examples, Evidence",
+          "id": "raise_q6_constraints_criterion_2",
+          "termIds": [
+            "flexibility_constraints"
+          ]
+        },
+        {
+          "requirement": "For each constraint, connects the affected terms of the compensation request, such as amount, effective date, or type of compensation, and explains reasoning.",
+          "required": true,
+          "label": "Details, Objective Facts, Subjective Facts, Evidence",
+          "id": "raise_q6_constraints_criterion_3",
+          "termIds": [
+            "compensation_amount",
+            "compensation_type",
+            "timing",
+            "flexibility_constraints"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "Not applicable; all criteria are mandatory.",
+      "primaryTermId": "flexibility_constraints"
+    },
+    {
+      "id": "raise_q7_alternatives",
+      "discussionArea": "Flexibility & Alternatives",
+      "question": "If your manager cannot approve the raise exactly as requested, what tradeoffs or alternative outcomes would you consider?",
+      "answerGuidance": [
+        "Must-have terms",
+        "Alternative means of compensation",
+        "Delaying the compensation change",
+        "Splitting the request over time",
+        "Performance triggers that unlock all or part of the raise"
+      ],
+      "highQualityCriteria": [
+        {
+          "requirement": "Lists one or more alternative compensation outcomes they would consider.",
+          "required": true,
+          "id": "raise_q7_alternatives_criterion_1",
+          "label": "Raise",
+          "termIds": [
+            "compensation_type",
+            "flexibility_constraints"
+          ]
+        },
+        {
+          "requirement": "For each alternative outcome, provides details including description, execution details, quantitative values, and dates where applicable.",
+          "required": true,
+          "id": "raise_q7_alternatives_criterion_2",
+          "label": "Raise",
+          "termIds": [
+            "compensation_amount",
+            "timing",
+            "flexibility_constraints"
+          ]
+        },
+        {
+          "requirement": "For each alternative outcome, provides reasoning for why this would be acceptable.",
+          "required": true,
+          "id": "raise_q7_alternatives_criterion_3",
+          "label": "Raise",
+          "termIds": [
+            "flexibility_constraints"
+          ]
+        },
+        {
+          "requirement": "For each alternative outcome, connects it back to the original compensation request and explains why it is an acceptable alternative.",
+          "required": true,
+          "id": "raise_q7_alternatives_criterion_4",
+          "label": "Raise",
+          "termIds": [
+            "compensation_type",
+            "flexibility_constraints"
+          ]
+        },
+        {
+          "requirement": "For each alternative outcome, describes known constraints that might prevent the outcome.",
+          "required": false,
+          "id": "raise_q7_alternatives_criterion_5",
+          "label": "Raise",
+          "termIds": [
+            "flexibility_constraints"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "100%",
+      "primaryTermId": "flexibility_constraints"
+    }
+  ],
+  "factTypes": [
+    {
+      "name": "Objective Fact",
+      "definition": "Verifiable, measurable data that remains consistent regardless of who observes it.",
+      "example": "Over the past 12 months, I increased personal sales by 20% year-over-year, generating an additional $500,000 in revenue."
+    },
+    {
+      "name": "Subjective Fact",
+      "definition": "Personal perception, professional judgment, or interpretation of value, often focused on how work was done.",
+      "example": "I believe my ability to mentor new hires boosted team morale and streamlined onboarding."
+    }
+  ],
+  "schemaVersion": 2,
+  "topicId": "raise",
+  "workflow": {
+    "actors": [
+      "requestor",
+      "participant"
+    ],
+    "factStatementLabel": "Confident Fact",
+    "postProcessingTimeoutMs": 420000
+  },
+  "terms": [
+    {
+      "id": "compensation_amount",
+      "label": "Compensation Amount",
+      "description": "Whether the requested raise amount, range, or percent is appropriate and well supported."
+    },
+    {
+      "id": "compensation_type",
+      "label": "Compensation Type",
+      "description": "Whether the requested mix of base pay, bonus, equity, paid time off, or other compensation is appropriate."
+    },
+    {
+      "id": "timing",
+      "label": "Timing",
+      "description": "Whether the requested effective date, review timing, or implementation schedule is appropriate."
+    },
+    {
+      "id": "performance_justification",
+      "label": "Performance Justification",
+      "description": "Whether results, responsibilities, professionalism, and work performance justify the compensation request."
+    },
+    {
+      "id": "fairness_market_fit",
+      "label": "Fairness & Market Fit",
+      "description": "Whether the request fits organization policy, peer equity, budget realities, and market compensation."
+    },
+    {
+      "id": "flexibility_constraints",
+      "label": "Flexibility & Constraints",
+      "description": "Whether constraints, tradeoffs, and alternative outcomes are realistic and useful."
+    }
+  ],
+  "ratingScale": [
+    {
+      "id": "not_supported",
+      "label": "Not Supported",
+      "score": 0,
+      "responseProfile": {
+        "stance": "The compensation request is not supported by the facts, timing, policy context, or business value.",
+        "evidenceStrength": "weak",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "weakly_supported",
+      "label": "Weakly Supported",
+      "score": 1,
+      "responseProfile": {
+        "stance": "The compensation request has limited support and leaves meaningful concerns unresolved.",
+        "evidenceStrength": "weak",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "partly_supported",
+      "label": "Partly Supported",
+      "score": 2,
+      "responseProfile": {
+        "stance": "The compensation request has some support but also has important gaps or tradeoffs.",
+        "evidenceStrength": "moderate",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "well_supported",
+      "label": "Well Supported",
+      "score": 3,
+      "responseProfile": {
+        "stance": "The compensation request is well supported by performance, role scope, timing, and fairness considerations.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "strongly_supported",
+      "label": "Strongly Supported",
+      "score": 4,
+      "responseProfile": {
+        "stance": "The compensation request is strongly supported by clear evidence, business value, market fit, and appropriate timing.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    }
+  ]
+}

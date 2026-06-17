@@ -1,0 +1,23 @@
+{
+  "name": "common-ground-testing-application",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local Playwright automation spike for Common Ground Partner AI Getting Started tests.",
+  "scripts": {
+    "ui": "node scripts/uiServer.js",
+    "test:case": "node src/index.js",
+    "test:case:headed": "node src/index.js --headed",
+    "validate": "node src/index.js --validate-config",
+    "validate:scenarios": "node scripts/validateScenarioController.js",
+    "validate:workflow": "node scripts/validateFullWorkflow.js",
+    "validate:fact-labeling": "node scripts/validateFactLabelingWorkflow.js",
+    "validate:onboarding": "node scripts/validateTopicOnboarding.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "playwright": "^1.53.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {}
+}

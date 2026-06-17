@@ -1,0 +1,27 @@
+{
+  "auth": {
+    "emailInput": "#email",
+    "passwordInput": "#password",
+    "submitButton": "button[type=\"submit\"]",
+    "logoutButton": "[data-testid=\"logout-button\"]"
+  },
+  "requestor": {
+    "newCaseLink": "a[href=\"/request/new\"]",
+    "participantNameInput": "input[type=\"text\"]",
+    "participantEmailInput": "input[type=\"email\"]",
+    "createCaseButton": "button[type=\"submit\"]",
+    "caseHeading": "h1, h2, h3",
+    "startGettingStartedButton": "button:has-text(\"Getting Started\")"
+  },
+  "participant": {
+    "caseRequestRow": "h1, h2, h3",
+    "acceptRequestButton": "button:has-text(\"Accept\")"
+  },
+  "partnerAi": {
+    "latestPrompt": "body",
+    "allMessages": "[data-testid=\"partner-ai-message\"]",
+    "responseInput": "textarea[placeholder=\"Enter your response here...\"]",
+    "sendButton": "button[aria-label=\"Send message\"]",
+    "postProcessingIndicator": "body:has-text(\"post-processing\")"
+  }
+}

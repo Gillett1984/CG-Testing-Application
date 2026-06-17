@@ -1,0 +1,13 @@
+{
+  "topic": "Raise",
+  "caseType": "Raise",
+  "runMode": "requestor_getting_started",
+  "existingCaseId": "",
+  "workflowScope": "requestor",
+  "testObjective": "Metadata only: verify Partner AI can complete Getting Started when the synthetic user provides high-quality raise negotiation answers.",
+  "testBehaviorPolicy": "Answer each primary question with a direct synthetic user response that follows the quality criteria.",
+  "numberOfCases": 1,
+  "maxTurns": 25,
+  "stopOnFailure": true,
+  "qualityCriteriaPath": "config/case-types/raise.json"
+}

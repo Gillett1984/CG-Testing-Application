@@ -1,0 +1,702 @@
+{
+  "schemaVersion": 2,
+  "topicId": "performance_review_coaching",
+  "caseType": "Performance Review - Coaching",
+  "description": "High-quality answer criteria for the Performance Review - Coaching Getting Started interview.",
+  "workflow": {
+    "actors": [
+      "requestor",
+      "participant"
+    ],
+    "factStatementLabel": "Confident Fact",
+    "postProcessingTimeoutMs": 420000
+  },
+  "terms": [
+    {
+      "id": "results_impact",
+      "label": "Results & Impact",
+      "description": "Outcomes achieved and the value those outcomes created for customers, teams, or the organization."
+    },
+    {
+      "id": "execution_ownership",
+      "label": "Execution & Ownership",
+      "description": "Planning, prioritization, follow-through, accountability, and effective delivery of responsibilities."
+    },
+    {
+      "id": "quality_craft",
+      "label": "Quality & Craft",
+      "description": "Accuracy, completeness, professional standards, and care applied to work products and decisions."
+    },
+    {
+      "id": "communication_collaboration",
+      "label": "Communication & Collaboration",
+      "description": "Clarity, responsiveness, coordination, trust, and effectiveness when working with others."
+    },
+    {
+      "id": "judgement_growth",
+      "label": "Judgement & Growth",
+      "description": "Decision quality, self-awareness, learning, adaptability, development, and readiness for broader responsibility."
+    }
+  ],
+  "ratingScale": [
+    {
+      "id": "unsatisfactory",
+      "label": "Unsatisfactory",
+      "score": 0,
+      "responseProfile": {
+        "stance": "Performance consistently falls materially short of expectations.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "needs_improvement",
+      "label": "Needs Improvement",
+      "score": 1,
+      "responseProfile": {
+        "stance": "Performance has meaningful gaps and requires focused improvement.",
+        "evidenceStrength": "moderate",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "meets_expectations",
+      "label": "Meets Expectations",
+      "score": 2,
+      "responseProfile": {
+        "stance": "Performance reliably fulfills the expectations of the role.",
+        "evidenceStrength": "moderate",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "exceeds_expectations",
+      "label": "Exceeds Expectations",
+      "score": 3,
+      "responseProfile": {
+        "stance": "Performance frequently surpasses normal expectations.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "outstanding",
+      "label": "Outstanding",
+      "score": 4,
+      "responseProfile": {
+        "stance": "Performance significantly and consistently surpasses expectations.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    }
+  ],
+  "primaryQuestions": [
+    {
+      "id": "performance_review_coaching_q1_current_role_focus_priorities",
+      "discussionArea": "Current Role Focus & Priorities",
+      "question": "What are the most important things you’re currently responsible for, and where is most of your time and energy going right now?",
+      "answerGuidance": [
+        "Your current role/title or functional position",
+        "The main responsibilities or priorities you are accountable for right now",
+        "Which responsibilities consume most of your time and attention",
+        "Any temporary projects or short-term priorities currently requiring focus",
+        "Any recent shifts in workload, ownership, or expectations",
+        "Areas where responsibilities or ownership feel unclear"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_coaching_q1_current_role_focus_priorities_criterion_1",
+          "requirement": "States current role/title or functional position.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q1_current_role_focus_priorities_criterion_2",
+          "requirement": "Lists one or more current responsibilities or priorities.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q1_current_role_focus_priorities_criterion_3",
+          "requirement": "Describes each responsibility in concrete, understandable terms.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q1_current_role_focus_priorities_criterion_4",
+          "requirement": "Identifies which responsibilities consume the most time.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q1_current_role_focus_priorities_criterion_5",
+          "requirement": "Distinguishes recurring responsibilities from temporary projects.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q1_current_role_focus_priorities_criterion_6",
+          "requirement": "Identifies any recent shift in priorities or workload.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q1_current_role_focus_priorities_criterion_7",
+          "requirement": "Explains why priorities shifted.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q1_current_role_focus_priorities_criterion_8",
+          "requirement": "Notes any uncertainty in role expectations or ownership.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "judgement_growth"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "execution_ownership"
+    },
+    {
+      "id": "performance_review_coaching_q2_progress_since_last_check_in",
+      "discussionArea": "Progress Since Last Check-In",
+      "question": "Since the last review or check-in, what progress or wins are you most proud of, and what helped you achieve them?",
+      "answerGuidance": [
+        "Accomplishments, wins, or meaningful progress since the last check-in",
+        "What specifically was achieved or improved",
+        "Why those accomplishments mattered",
+        "Actions you took that contributed to success",
+        "Support, collaboration, or resources that helped",
+        "Any measurable results, positive outcomes, or lessons learned"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_coaching_q2_progress_since_last_check_in_criterion_1",
+          "requirement": "Lists one or more high-value accomplishments.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "results_impact"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q2_progress_since_last_check_in_criterion_2",
+          "requirement": "For each accomplishment, describes the accomplishment in detail.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "results_impact"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q2_progress_since_last_check_in_criterion_3",
+          "requirement": "For each accomplishment, explains why the accomplishment mattered.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "results_impact"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q2_progress_since_last_check_in_criterion_4",
+          "requirement": "For each accomplishment, identifies actions taken that contributed to achieving the accomplishment.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q2_progress_since_last_check_in_criterion_5",
+          "requirement": "For each accomplishment, cites measurable outcomes.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "results_impact"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q2_progress_since_last_check_in_criterion_6",
+          "requirement": "Connects accomplishments to team, customer, or business outcomes.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "results_impact"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q2_progress_since_last_check_in_criterion_7",
+          "requirement": "Notes collaboration or support received from others to achieve accomplishment(s).",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "communication_collaboration"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q2_progress_since_last_check_in_criterion_8",
+          "requirement": "Reflects on repeatable lessons learned while achieving the accomplishment(s).",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "judgement_growth"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "results_impact"
+    },
+    {
+      "id": "performance_review_coaching_q3_current_challenges_obstacles",
+      "discussionArea": "Current Challenges & Obstacles",
+      "question": "What is making your work harder than it needs to be right now, and what impact is that having?",
+      "answerGuidance": [
+        "Tools, systems, or processes slowing you down",
+        "Workload, interruptions, or competing priorities creating strain",
+        "Communication or coordination issues causing friction",
+        "Delays, handoff problems, or unclear ownership",
+        "How these issues affect speed, quality, or outcomes",
+        "Which obstacles would be most valuable to solve first",
+        "Any steps you have already taken to improve the situation"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_coaching_q3_current_challenges_obstacles_criterion_1",
+          "requirement": "Lists one or more obstacles or friction points.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q3_current_challenges_obstacles_criterion_2",
+          "requirement": "Describes each obstacle clearly and concretely.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q3_current_challenges_obstacles_criterion_3",
+          "requirement": "Explains how each obstacle affects one or more of the following: productivity, quality, or speed.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "execution_ownership",
+            "quality_craft",
+            "results_impact"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q3_current_challenges_obstacles_criterion_4",
+          "requirement": "For each obstacle, states whether the obstacle is predominantly a workload, process, tool, or people-related obstacle.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q3_current_challenges_obstacles_criterion_5",
+          "requirement": "For one or more obstacles, provides an example of where the obstacle caused delays or inefficiency.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q3_current_challenges_obstacles_criterion_6",
+          "requirement": "Provides the reasoning for which obstacles are, or were, the most important.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "judgement_growth"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q3_current_challenges_obstacles_criterion_7",
+          "requirement": "For one or more obstacles, describes any actions already taken personally to improve the situation.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "execution_ownership"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "execution_ownership"
+    },
+    {
+      "id": "performance_review_coaching_q4_support_needed",
+      "discussionArea": "Support Needed From Manager / Organization",
+      "question": "What support, clarity, resources, or changes would help you perform at a higher level over the next period?",
+      "answerGuidance": [
+        "Coaching or feedback that would help you improve",
+        "Clearer priorities, expectations, or decision-making support needed",
+        "Tools, staffing, training, or resources that would help performance",
+        "Process changes that would remove friction",
+        "Which support needs are most important right now",
+        "How this support would improve results"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_coaching_q4_support_needed_criterion_1",
+          "requirement": "Lists one or more support, clarity, resource, or change needs in detail.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "judgement_growth"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q4_support_needed_criterion_2",
+          "requirement": "Describes each need clearly and concretely.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "judgement_growth"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q4_support_needed_criterion_3",
+          "requirement": "For each need, explains how having the need met would improve performance.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "results_impact",
+            "quality_craft"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q4_support_needed_criterion_4",
+          "requirement": "Provides the reasoning for which needs are highest priority.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "judgement_growth"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q4_support_needed_criterion_5",
+          "requirement": "Provides examples of how satisfying the need will positively impact one or more of the following: personal goals or company objectives.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "results_impact"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q4_support_needed_criterion_6",
+          "requirement": "For one or more needs, notes support already received that has helped.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "communication_collaboration"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q4_support_needed_criterion_7",
+          "requirement": "Distinguishes short-term from long-term support needs.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "judgement_growth"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "judgement_growth"
+    },
+    {
+      "id": "performance_review_coaching_q5_communication_working_relationship",
+      "discussionArea": "Communication & Working Relationship Pulse",
+      "question": "How are communication, feedback, and coordination working between you, your manager, and others you work with?",
+      "answerGuidance": [
+        "How you typically communicate with your manager, peers, or stakeholders",
+        "How work is coordinated day to day",
+        "What communication practices are working well",
+        "Where communication or coordination breaks down",
+        "Causes of delays, confusion, or misalignment",
+        "Improvements that would help collaboration"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_coaching_q5_communication_working_relationship_criterion_1",
+          "requirement": "Clearly describes typical communication with their manager addressing one or more of the following: clarity, effectiveness, responsiveness, adaptability, or tone.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "communication_collaboration"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q5_communication_working_relationship_criterion_2",
+          "requirement": "Clearly describes typical communication with others, such as co-workers, customers, and contractors, addressing one or more of the following: clarity, effectiveness, responsiveness, adaptability, or tone.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "communication_collaboration"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q5_communication_working_relationship_criterion_3",
+          "requirement": "Explains how work coordination typically happens.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "communication_collaboration"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q5_communication_working_relationship_criterion_4",
+          "requirement": "Identifies the elements of their communication that are leading to positive outcomes.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "communication_collaboration"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q5_communication_working_relationship_criterion_5",
+          "requirement": "Identifies the elements of their communication that are leading to one or more breakdowns, friction points, or negative outcomes.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "communication_collaboration"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q5_communication_working_relationship_criterion_6",
+          "requirement": "For one or more identified breakdowns, friction points, or negative outcomes, explains the causes with examples.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "communication_collaboration"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q5_communication_working_relationship_criterion_7",
+          "requirement": "Provides one or more examples of how communication affected the outcome positively or negatively.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "communication_collaboration"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q5_communication_working_relationship_criterion_8",
+          "requirement": "Provides one or more suggestions for how they can improve communication or coordination.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "communication_collaboration"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "communication_collaboration"
+    },
+    {
+      "id": "performance_review_coaching_q6_growth_development",
+      "discussionArea": "Growth & Development",
+      "question": "What skills, experiences, or responsibilities would you like to grow into next, and what would help you get there?",
+      "answerGuidance": [
+        "Skills you would like to strengthen or learn",
+        "Responsibilities or experiences you want exposure to",
+        "Career growth interests or readiness goals",
+        "Why these areas matter to you or your performance",
+        "Support, coaching, or opportunities that would help",
+        "Any current gaps you need to close first",
+        "Which development areas should come first, and why"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_coaching_q6_growth_development_criterion_1",
+          "requirement": "Identifies one or more realistic development goals addressing one or more of the following: skills development, new experiences, or new responsibilities.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "judgement_growth"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q6_growth_development_criterion_2",
+          "requirement": "For each development goal, describes desired skills, experiences, or responsibilities clearly and concretely.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "judgement_growth"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q6_growth_development_criterion_3",
+          "requirement": "For each development goal, explains how each listed development goal will positively impact one or more of the following: personal goals or company objectives.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "results_impact"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q6_growth_development_criterion_4",
+          "requirement": "For each development goal, explains what support is needed to develop.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "judgement_growth"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q6_growth_development_criterion_5",
+          "requirement": "Provides reasoning for why certain development goals should be prioritized over others.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "judgement_growth"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q6_growth_development_criterion_6",
+          "requirement": "Establishes a sequence or timeline for addressing development goals.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "judgement_growth"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "judgement_growth"
+    },
+    {
+      "id": "performance_review_coaching_q7_next_period_priorities",
+      "discussionArea": "Next Period Priorities",
+      "question": "What should your top priorities be for the next period, and how should success be measured?",
+      "answerGuidance": [
+        "The most important goals or priorities for the next period",
+        "Which priorities should continue from the current period",
+        "Any new priorities that should be added",
+        "Specific targets, deliverables, or outcomes for each priority",
+        "Why each priority matters",
+        "Support, dependencies, or trade-offs that may affect success"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_coaching_q7_next_period_priorities_criterion_1",
+          "requirement": "Lists one or more priorities for the next period.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q7_next_period_priorities_criterion_2",
+          "requirement": "Describes each priority in concrete, understandable terms.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q7_next_period_priorities_criterion_3",
+          "requirement": "For each priority, cites measurable targets or clear success outcomes.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "results_impact"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q7_next_period_priorities_criterion_4",
+          "requirement": "For each priority, explains how it impacts one or more of the following: personal goals or company objectives.",
+          "required": true,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "results_impact"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q7_next_period_priorities_criterion_5",
+          "requirement": "For each priority, states whether it is a continuing priority or a new priority.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q7_next_period_priorities_criterion_6",
+          "requirement": "Reflects lessons learned from the prior period in setting priorities.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "judgement_growth"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q7_next_period_priorities_criterion_7",
+          "requirement": "Identifies dependencies or support needed to achieve priorities.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "communication_collaboration"
+          ]
+        },
+        {
+          "id": "performance_review_coaching_q7_next_period_priorities_criterion_8",
+          "requirement": "Provides reasoning for why certain priorities should be prioritized over others if trade-offs arise.",
+          "required": false,
+          "label": "Performance Review Coaching",
+          "termIds": [
+            "judgement_growth"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "execution_ownership"
+    }
+  ]
+}

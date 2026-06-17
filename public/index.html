@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Common Ground Test Runner</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <h1>Common Ground Test Runner</h1>
+        <p id="envSummary">Loading configuration...</p>
+      </div>
+      <nav class="workspace-tabs" aria-label="Workspace">
+        <button id="showRunner" type="button" class="active">Runner</button>
+        <button id="showTopicSetup" type="button">Topic Setup</button>
+      </nav>
+      <div class="header-actions">
+        <button id="stopRun" type="button">Stop</button>
+        <button id="startRun" type="button" class="primary">Start Run</button>
+      </div>
+    </header>
+
+    <main id="runnerWorkspace" class="layout">
+      <section class="panel run-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Run Setup</h2>
+            <p>One named alignment scenario per Common Ground case.</p>
+          </div>
+          <label class="toggle">
+            <input id="headed" type="checkbox" checked>
+            <span>Show browser</span>
+          </label>
+        </div>
+
+        <div class="form-grid">
+          <label>
+            <span>Topic</span>
+            <select id="caseType"></select>
+          </label>
+          <label>
+            <span>Workflow</span>
+            <select id="runMode">
+              <option value="full_workflow">Full Requestor + Participant</option>
+              <option value="requestor_getting_started">Requestor Getting Started only</option>
+              <option value="participant_getting_started">Participant Getting Started only</option>
+              <option value="fact_labeling_smoke">Fact Labeling Smoke Test</option>
+            </select>
+          </label>
+          <label id="existingCaseIdField">
+            <span>Common Ground Case ID</span>
+            <input id="existingCaseId" type="text" placeholder="CG-0127 or 0127">
+          </label>
+          <label id="factRatingStageField" hidden>
+            <span>Fact Labeling Stage</span>
+            <select id="factRatingStage">
+              <option value="requestor_own">Requestor labels own facts</option>
+              <option value="participant_rates_requestor">Participant rates Requestor facts</option>
+              <option value="participant_own">Participant labels own facts</option>
+              <option value="requestor_rates_participant">Requestor rates Participant facts</option>
+            </select>
+          </label>
+          <label>
+            <span>Named Scenario</span>
+            <select id="alignmentScenario"></select>
+          </label>
+          <label>
+            <span>Number Of Cases</span>
+            <input id="numberOfCases" type="number" min="1" step="1" value="1">
+          </label>
+          <label>
+            <span>Max Conversation Turns</span>
+            <input id="maxTurns" type="number" min="1" step="1" value="50">
+          </label>
+          <label>
+            <span>Scenario Seed</span>
+            <input id="scenarioSeed" type="text" placeholder="Generated from run ID when blank">
+          </label>
+          <label>
+            <span>Failure Behavior</span>
+            <select id="stopOnFailure">
+              <option value="true">Stop batch on case failure</option>
+              <option value="false">Continue batch</option>
+            </select>
+          </label>
+        </div>
+
+        <label class="full">
+          <span>Test Objective Metadata</span>
+          <textarea id="testObjective" rows="3"></textarea>
+        </label>
+
+        <div id="topicUnsupported" class="notice error" hidden></div>
+      </section>
+
+      <section class="panel scenario-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Scenario Ratings</h2>
+            <p id="scenarioDescription">Select a named scenario.</p>
+          </div>
+          <span id="alignmentRange" class="range-badge">-</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Performance term</th><th>Employee</th><th>Manager</th></tr>
+            </thead>
+            <tbody id="scenarioRatings"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel behavior-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Behavior Schedule</h2>
+            <p>Enabled behaviors form the candidate pool. The seeded controller selects the requested count for both parties.</p>
+          </div>
+          <button id="resetSchedule" type="button">Reset</button>
+        </div>
+        <div class="schedule-toolbar">
+          <label>
+            <span>Behaviors Per Party</span>
+            <input id="behaviorCount" type="number" min="1" step="1" value="6">
+          </label>
+          <div class="schedule-stat">
+            <span>Eligible</span>
+            <strong id="eligibleBehaviorCount">0</strong>
+          </div>
+          <div class="schedule-stat">
+            <span>Candidate stages</span>
+            <strong id="questionPlacementCount">0</strong>
+          </div>
+        </div>
+        <div id="compatibilityWarnings" class="notice warning" hidden></div>
+        <div id="behaviorEditor" class="behavior-list"></div>
+      </section>
+
+      <section class="panel topic-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Topic Definition</h2>
+            <p id="topicDefinitionSummary">-</p>
+          </div>
+        </div>
+        <div id="topicTerms" class="term-list"></div>
+      </section>
+
+      <section class="panel status-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Run Status</h2>
+            <p id="runSummary">No run started.</p>
+          </div>
+          <span id="statusPill" class="pill">Idle</span>
+        </div>
+        <div class="status-grid">
+          <div><span>Artifacts</span><strong id="artifactDir">-</strong></div>
+          <div><span>Common Ground Case</span><strong id="caseId">-</strong></div>
+          <div><span>Behavior coverage</span><strong id="coverageTotal">-</strong></div>
+          <div><span>Soft failures</span><strong id="softFailureTotal">-</strong></div>
+          <div><span>Alignment score</span><strong id="alignmentScore">-</strong></div>
+        </div>
+      </section>
+
+      <section class="panel timeline-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Behavior Timeline</h2>
+            <p>Assigned behavior, response turn, QFI result, and observed Partner AI handling.</p>
+          </div>
+        </div>
+        <div id="behaviorTimeline" class="empty-state">Behavior executions will appear after a run.</div>
+      </section>
+
+      <section class="panel contrast-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Scenario Expression Plan</h2>
+            <p>The plain-language employee and manager positions generated for each primary question.</p>
+          </div>
+        </div>
+        <div id="scenarioExpressions" class="empty-state">Question relationships will appear after scenario generation.</div>
+      </section>
+
+      <section class="panel assertions-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Soft Assertions</h2>
+            <p>These findings are recorded but do not determine overall case status.</p>
+          </div>
+        </div>
+        <div id="softAssertions" class="empty-state">No soft assertions recorded.</div>
+      </section>
+
+      <section class="panel log-panel">
+        <div class="panel-heading"><h2>Runner Log</h2></div>
+        <pre id="logs"></pre>
+      </section>
+    </main>
+
+    <main id="topicSetupWorkspace" class="topic-setup-layout" hidden>
+      <section class="panel onboarding-intro">
+        <div class="panel-heading">
+          <div>
+            <h2>New Topic Onboarding</h2>
+            <p>Import a Word source, review generated questions and mappings, then explicitly approve the topic for testing.</p>
+          </div>
+          <span id="draftStatus" class="pill">No draft</span>
+        </div>
+        <div class="onboarding-steps" aria-label="Topic onboarding progress">
+          <span class="active" data-draft-step="source">1 Source</span>
+          <span data-draft-step="review">2 Review</span>
+          <span data-draft-step="publish">3 Approve</span>
+        </div>
+      </section>
+
+      <section class="panel topic-source-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Source And Metadata</h2>
+            <p>The source document should contain primary questions, discussion areas, and mandatory or optional criteria.</p>
+          </div>
+          <button id="newTopicDraft" type="button">Clear</button>
+        </div>
+        <div class="form-grid">
+          <label>
+            <span>Topic Name</span>
+            <input id="draftCaseType" type="text" placeholder="Performance Review - Coaching">
+          </label>
+          <label>
+            <span>Word Source</span>
+            <input id="draftSourceFile" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+          </label>
+        </div>
+        <label class="full">
+          <span>Description</span>
+          <textarea id="draftDescription" rows="2" placeholder="Purpose of this interview topic"></textarea>
+        </label>
+        <fieldset class="actor-options">
+          <legend>Workflow Actors</legend>
+          <label><input id="draftRequestor" type="checkbox" checked> Requestor</label>
+          <label><input id="draftParticipant" type="checkbox" checked> Participant</label>
+        </fieldset>
+        <label class="full">
+          <span>Topic Terms</span>
+          <textarea id="draftTerms" rows="6" placeholder="One per line: Term name | Description&#10;Leave blank to generate suggestions from the source."></textarea>
+        </label>
+        <details class="advanced-options">
+          <summary>Optional rating scale override</summary>
+          <p>Leave blank to use the built-in five-level performance scale.</p>
+          <textarea id="draftRatingScale" rows="7" placeholder='JSON array of rating levels'></textarea>
+        </details>
+        <div class="form-actions">
+          <button id="generateTopicDraft" type="button" class="primary">Generate Draft</button>
+          <span id="generationStatus" class="inline-status"></span>
+        </div>
+      </section>
+
+      <aside class="panel draft-library-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Draft Library</h2>
+            <p>Generated drafts remain separate from runnable topics until approval.</p>
+          </div>
+          <button id="refreshDrafts" type="button" title="Refresh draft list">Refresh</button>
+        </div>
+        <div id="draftLibrary" class="draft-library empty-state">No drafts yet.</div>
+      </aside>
+
+      <section id="draftReviewPanel" class="panel draft-review-panel" hidden>
+        <div class="panel-heading">
+          <div>
+            <h2>Draft Review</h2>
+            <p>Edit generated content and mappings. Nothing here reaches the runner until you approve it.</p>
+          </div>
+          <div class="header-actions">
+            <button id="saveTopicDraft" type="button">Save Draft</button>
+            <button id="publishTopicDraft" type="button" class="primary">Approve &amp; Publish</button>
+          </div>
+        </div>
+        <div id="draftValidation" class="notice error" hidden></div>
+        <section class="draft-terms-section">
+          <h3>Approved Terms</h3>
+          <div id="draftTermEditor" class="term-editor"></div>
+        </section>
+        <section class="draft-questions-section">
+          <div class="section-heading">
+            <h3>Primary Questions And Criteria</h3>
+            <button id="addDraftQuestion" type="button">Add Question</button>
+          </div>
+          <div id="draftQuestionEditor" class="question-editor"></div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

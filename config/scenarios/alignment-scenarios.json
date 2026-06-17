@@ -1,0 +1,174 @@
+{
+  "schemaVersion": 1,
+  "ratingScaleId": "five_level_performance",
+  "scenarios": [
+    {
+      "id": "extremely_misaligned",
+      "name": "Extremely Misaligned",
+      "description": "The employee and manager assess every performance term at opposite ends of the rating scale.",
+      "builtIn": true,
+      "editableCopy": true,
+      "expectedAlignmentRange": { "min": 0, "max": 40, "minInclusive": true, "maxInclusive": false },
+      "ratings": {
+        "requestor": {
+          "results_impact": "outstanding",
+          "execution_ownership": "outstanding",
+          "quality_craft": "outstanding",
+          "communication_collaboration": "outstanding",
+          "judgement_growth": "outstanding"
+        },
+        "participant": {
+          "results_impact": "unsatisfactory",
+          "execution_ownership": "unsatisfactory",
+          "quality_craft": "unsatisfactory",
+          "communication_collaboration": "unsatisfactory",
+          "judgement_growth": "unsatisfactory"
+        }
+      }
+    },
+    {
+      "id": "three_step_misaligned_sometimes",
+      "name": "3 Step Misaligned Sometimes",
+      "description": "Ratings vary across terms and differ by no more than three rating steps.",
+      "builtIn": true,
+      "editableCopy": true,
+      "expectedAlignmentRange": { "min": 40, "max": 60, "minInclusive": true, "maxInclusive": true },
+      "ratings": {
+        "requestor": {
+          "results_impact": "unsatisfactory",
+          "execution_ownership": "meets_expectations",
+          "quality_craft": "outstanding",
+          "communication_collaboration": "exceeds_expectations",
+          "judgement_growth": "meets_expectations"
+        },
+        "participant": {
+          "results_impact": "exceeds_expectations",
+          "execution_ownership": "needs_improvement",
+          "quality_craft": "needs_improvement",
+          "communication_collaboration": "unsatisfactory",
+          "judgement_growth": "unsatisfactory"
+        }
+      }
+    },
+    {
+      "id": "two_step_misaligned_sometimes",
+      "name": "2 Step Misaligned Sometimes",
+      "description": "Ratings vary across terms and differ by no more than two rating steps.",
+      "builtIn": true,
+      "editableCopy": true,
+      "expectedAlignmentRange": { "min": 50, "max": 70, "minInclusive": true, "maxInclusive": true },
+      "ratings": {
+        "requestor": {
+          "results_impact": "outstanding",
+          "execution_ownership": "exceeds_expectations",
+          "quality_craft": "meets_expectations",
+          "communication_collaboration": "unsatisfactory",
+          "judgement_growth": "meets_expectations"
+        },
+        "participant": {
+          "results_impact": "meets_expectations",
+          "execution_ownership": "meets_expectations",
+          "quality_craft": "unsatisfactory",
+          "communication_collaboration": "meets_expectations",
+          "judgement_growth": "unsatisfactory"
+        }
+      }
+    },
+    {
+      "id": "one_step_misaligned_sometimes",
+      "name": "1 Step Misaligned Sometimes",
+      "description": "Ratings are identical or differ by one adjacent rating step.",
+      "builtIn": true,
+      "editableCopy": true,
+      "expectedAlignmentRange": { "min": 60, "max": 80, "minInclusive": true, "maxInclusive": true },
+      "ratings": {
+        "requestor": {
+          "results_impact": "outstanding",
+          "execution_ownership": "exceeds_expectations",
+          "quality_craft": "meets_expectations",
+          "communication_collaboration": "meets_expectations",
+          "judgement_growth": "exceeds_expectations"
+        },
+        "participant": {
+          "results_impact": "exceeds_expectations",
+          "execution_ownership": "meets_expectations",
+          "quality_craft": "meets_expectations",
+          "communication_collaboration": "meets_expectations",
+          "judgement_growth": "meets_expectations"
+        }
+      }
+    },
+    {
+      "id": "well_aligned_outstanding",
+      "name": "Well Aligned - Outstanding Performance",
+      "description": "Both parties assess every performance term as Outstanding.",
+      "builtIn": true,
+      "editableCopy": true,
+      "expectedAlignmentRange": { "min": 90, "max": 100, "minInclusive": false, "maxInclusive": true },
+      "ratings": {
+        "requestor": {
+          "results_impact": "outstanding",
+          "execution_ownership": "outstanding",
+          "quality_craft": "outstanding",
+          "communication_collaboration": "outstanding",
+          "judgement_growth": "outstanding"
+        },
+        "participant": {
+          "results_impact": "outstanding",
+          "execution_ownership": "outstanding",
+          "quality_craft": "outstanding",
+          "communication_collaboration": "outstanding",
+          "judgement_growth": "outstanding"
+        }
+      }
+    },
+    {
+      "id": "well_aligned_poor",
+      "name": "Well Aligned - Poor Performance",
+      "description": "Both parties assess every performance term as Unsatisfactory.",
+      "builtIn": true,
+      "editableCopy": true,
+      "expectedAlignmentRange": { "min": 90, "max": 100, "minInclusive": false, "maxInclusive": true },
+      "ratings": {
+        "requestor": {
+          "results_impact": "unsatisfactory",
+          "execution_ownership": "unsatisfactory",
+          "quality_craft": "unsatisfactory",
+          "communication_collaboration": "unsatisfactory",
+          "judgement_growth": "unsatisfactory"
+        },
+        "participant": {
+          "results_impact": "unsatisfactory",
+          "execution_ownership": "unsatisfactory",
+          "quality_craft": "unsatisfactory",
+          "communication_collaboration": "unsatisfactory",
+          "judgement_growth": "unsatisfactory"
+        }
+      }
+    },
+    {
+      "id": "well_aligned_mixed",
+      "name": "Well Aligned - Mixed Performance",
+      "description": "Both parties share the same mixed assessment across all performance terms.",
+      "builtIn": true,
+      "editableCopy": true,
+      "expectedAlignmentRange": { "min": 90, "max": 100, "minInclusive": false, "maxInclusive": true },
+      "ratings": {
+        "requestor": {
+          "results_impact": "exceeds_expectations",
+          "execution_ownership": "meets_expectations",
+          "quality_craft": "outstanding",
+          "communication_collaboration": "needs_improvement",
+          "judgement_growth": "outstanding"
+        },
+        "participant": {
+          "results_impact": "exceeds_expectations",
+          "execution_ownership": "meets_expectations",
+          "quality_craft": "outstanding",
+          "communication_collaboration": "needs_improvement",
+          "judgement_growth": "outstanding"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "fatigueRanges": {
+    "low": [0, 39],
+    "moderate": [40, 69],
+    "high": [70, 84],
+    "critical": [85, 100]
+  },
+  "behaviors": [
+    {
+      "id": "clarification_request",
+      "name": "Clarification Request",
+      "description": "Ask Partner AI to clarify what the current question is asking before answering it.",
+      "stages": ["request", "answer_after_help"],
+      "compatibleWith": ["fatigue_expression"],
+      "incompatibleWith": ["skip_current_item", "off_topic_response"],
+      "expectedPartnerAiBehavior": "Partner AI clarifies the current question and returns to it.",
+      "softAssertionOnly": true
+    },
+    {
+      "id": "definition_request",
+      "name": "Term Definition Request",
+      "description": "Ask Partner AI to define a specific term or phrase from the current question.",
+      "stages": ["request", "answer_after_help"],
+      "compatibleWith": ["fatigue_expression"],
+      "incompatibleWith": ["skip_current_item", "off_topic_response"],
+      "expectedPartnerAiBehavior": "Partner AI defines the requested term and returns to the current question.",
+      "softAssertionOnly": true
+    },
+    {
+      "id": "example_request",
+      "name": "Example Request",
+      "description": "Ask Partner AI for a concrete example relevant to the current question.",
+      "stages": ["request", "answer_after_help"],
+      "compatibleWith": ["fatigue_expression"],
+      "incompatibleWith": ["skip_current_item", "off_topic_response"],
+      "expectedPartnerAiBehavior": "Partner AI provides a relevant example and returns to the current question.",
+      "softAssertionOnly": true
+    },
+    {
+      "id": "uncertainty_expression",
+      "name": "Uncertainty Expression",
+      "description": "Express uncertainty about the answer while remaining related to the current topic.",
+      "stages": ["expression", "recovery_answer"],
+      "compatibleWith": ["fatigue_expression", "embedded_questions"],
+      "incompatibleWith": ["skip_current_item", "off_topic_response"],
+      "expectedPartnerAiBehavior": "Partner AI recognizes uncertainty and offers clarification or an example.",
+      "softAssertionOnly": true
+    },
+    {
+      "id": "skip_current_item",
+      "name": "Skip Current Item",
+      "description": "Ask to skip the current criterion or primary question and later address it when Partner AI resurfaces skipped material.",
+      "stages": ["skip_request", "resurfaced_response"],
+      "compatibleWith": ["fatigue_expression"],
+      "incompatibleWith": ["clarification_request", "definition_request", "example_request", "off_topic_response", "embedded_questions"],
+      "expectedPartnerAiBehavior": "Partner AI advances, then resurfaces the skipped item before ending the interview.",
+      "softAssertionOnly": true
+    },
+    {
+      "id": "off_topic_response",
+      "name": "Off-Topic Response",
+      "description": "Give an answer unrelated to the configured topic, followed by a contextual recovery answer.",
+      "stages": ["off_topic", "recovery_answer"],
+      "compatibleWith": [],
+      "incompatibleWith": ["clarification_request", "definition_request", "example_request", "uncertainty_expression", "skip_current_item", "embedded_questions", "correction_previous_response", "add_to_previous_response"],
+      "expectedPartnerAiBehavior": "Partner AI gently redirects the user to the current topic or question.",
+      "softAssertionOnly": true
+    },
+    {
+      "id": "embedded_questions",
+      "name": "Questions Embedded in Responses",
+      "description": "Exercise a question-only response and questions at the beginning, middle, and end of otherwise substantive responses.",
+      "stages": ["question_only", "question_at_beginning", "question_in_middle", "question_at_end"],
+      "compatibleWith": ["uncertainty_expression", "fatigue_expression"],
+      "incompatibleWith": ["skip_current_item", "off_topic_response"],
+      "expectedPartnerAiBehavior": "Partner AI answers each embedded question and also handles any substantive information in the response.",
+      "softAssertionOnly": true
+    },
+    {
+      "id": "correction_previous_response",
+      "name": "Correct Previous Information",
+      "description": "Correct a retained fact from an earlier answer and confirm the revised fact in its original context.",
+      "stages": ["correction_request", "provide_corrected_fact", "confirm_or_revise"],
+      "compatibleWith": ["fatigue_expression"],
+      "incompatibleWith": ["off_topic_response", "add_to_previous_response"],
+      "expectedPartnerAiBehavior": "Partner AI requests the correction, repeats the updated information in context, confirms it, and resumes the prior interview position.",
+      "softAssertionOnly": true
+    },
+    {
+      "id": "add_to_previous_response",
+      "name": "Add to Previous Response",
+      "description": "Return to an earlier question, add new retained information, confirm the combined answer, and resume the interview.",
+      "stages": ["identify_prior_question", "provide_additional_fact", "confirm_or_revise"],
+      "compatibleWith": ["fatigue_expression"],
+      "incompatibleWith": ["off_topic_response", "correction_previous_response"],
+      "expectedPartnerAiBehavior": "Partner AI identifies and confirms the prior question, collects the additional information, confirms the combined context, and resumes.",
+      "softAssertionOnly": true
+    },
+    {
+      "id": "context_reuse",
+      "name": "Earlier Context Reuse",
+      "description": "Provide information that should be useful when Partner AI asks a later related question.",
+      "stages": ["seed_context", "observe_reuse"],
+      "compatibleWith": ["fatigue_expression"],
+      "incompatibleWith": ["off_topic_response"],
+      "expectedPartnerAiBehavior": "Partner AI refers to relevant information collected earlier when asking or framing a later question.",
+      "softAssertionOnly": true
+    },
+    {
+      "id": "contradiction",
+      "name": "Potential Contradiction",
+      "description": "Provide information that conflicts with a retained earlier fact, then clarify the intended fact.",
+      "stages": ["seed_fact", "contradict_fact", "clarify_fact"],
+      "compatibleWith": ["fatigue_expression"],
+      "incompatibleWith": ["off_topic_response"],
+      "expectedPartnerAiBehavior": "Partner AI surfaces the potential conflict and asks the user to clarify.",
+      "softAssertionOnly": true
+    },
+    {
+      "id": "fatigue_expression",
+      "name": "Fatigue Expression",
+      "description": "Craft a response intended to produce an explicitly assigned Common Ground QFI fatigue range.",
+      "stages": ["single"],
+      "compatibleWith": ["clarification_request", "definition_request", "example_request", "uncertainty_expression", "skip_current_item", "embedded_questions", "correction_previous_response", "add_to_previous_response", "context_reuse", "contradiction"],
+      "incompatibleWith": ["off_topic_response"],
+      "expectedPartnerAiBehavior": "Partner AI takes the action associated with the assigned fatigue range.",
+      "softAssertionOnly": true
+    }
+  ]
+}

@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "id": "default_six",
+  "name": "Default Six Behaviors",
+  "description": "Select six enabled behavioral tests per party and resolve each randomized target before the interview starts.",
+  "builtIn": true,
+  "editableCopy": true,
+  "seedStrategy": "run_id",
+  "actors": "identical",
+  "behaviorCountPerActor": 6,
+  "behaviors": [
+    {
+      "id": "default_clarification",
+      "behaviorId": "clarification_request",
+      "enabled": true,
+      "target": { "mode": "random_criterion", "excludeCriterionIds": [] },
+      "combineWith": [],
+      "repetitionsPerActor": 1
+    },
+    {
+      "id": "default_definition",
+      "behaviorId": "definition_request",
+      "enabled": true,
+      "target": { "mode": "random_criterion", "excludeCriterionIds": [] },
+      "combineWith": [],
+      "repetitionsPerActor": 1
+    },
+    {
+      "id": "default_example",
+      "behaviorId": "example_request",
+      "enabled": true,
+      "target": { "mode": "random_criterion", "excludeCriterionIds": [] },
+      "combineWith": [],
+      "repetitionsPerActor": 1
+    },
+    {
+      "id": "default_uncertainty",
+      "behaviorId": "uncertainty_expression",
+      "enabled": true,
+      "target": { "mode": "random_primary_question", "excludePrimaryQuestionIds": [] },
+      "combineWith": [],
+      "repetitionsPerActor": 1
+    },
+    {
+      "id": "default_skip",
+      "behaviorId": "skip_current_item",
+      "enabled": true,
+      "target": { "mode": "random_criterion", "excludeCriterionIds": [] },
+      "combineWith": [],
+      "repetitionsPerActor": 1
+    },
+    {
+      "id": "default_embedded_questions",
+      "behaviorId": "embedded_questions",
+      "enabled": true,
+      "target": { "mode": "random_primary_question", "excludePrimaryQuestionIds": [] },
+      "stageTargets": {
+        "question_only": { "mode": "random_primary_question", "excludePrimaryQuestionIds": [] },
+        "question_at_beginning": { "mode": "random_primary_question", "excludePrimaryQuestionIds": [] },
+        "question_in_middle": { "mode": "random_primary_question", "excludePrimaryQuestionIds": [] },
+        "question_at_end": { "mode": "random_primary_question", "excludePrimaryQuestionIds": [] }
+      },
+      "combineWith": [],
+      "repetitionsPerActor": 1
+    },
+    {
+      "id": "optional_moderate_fatigue",
+      "behaviorId": "fatigue_expression",
+      "enabled": true,
+      "target": { "mode": "random_primary_question", "excludePrimaryQuestionIds": [] },
+      "fatigueLevel": "moderate",
+      "combineWith": [],
+      "repetitionsPerActor": 1
+    },
+    {
+      "id": "optional_correction",
+      "behaviorId": "correction_previous_response",
+      "enabled": true,
+      "target": { "mode": "random_primary_question", "excludePrimaryQuestionIds": [] },
+      "combineWith": [],
+      "repetitionsPerActor": 1
+    },
+    {
+      "id": "optional_add_information",
+      "behaviorId": "add_to_previous_response",
+      "enabled": true,
+      "target": { "mode": "random_primary_question", "excludePrimaryQuestionIds": [] },
+      "combineWith": [],
+      "repetitionsPerActor": 1
+    },
+    {
+      "id": "optional_context_reuse",
+      "behaviorId": "context_reuse",
+      "enabled": true,
+      "target": { "mode": "random_primary_question", "excludePrimaryQuestionIds": [] },
+      "combineWith": [],
+      "repetitionsPerActor": 1
+    },
+    {
+      "id": "optional_contradiction",
+      "behaviorId": "contradiction",
+      "enabled": true,
+      "target": { "mode": "random_primary_question", "excludePrimaryQuestionIds": [] },
+      "combineWith": [],
+      "repetitionsPerActor": 1
+    },
+    {
+      "id": "optional_off_topic",
+      "behaviorId": "off_topic_response",
+      "enabled": true,
+      "target": { "mode": "random_primary_question", "excludePrimaryQuestionIds": [] },
+      "combineWith": [],
+      "repetitionsPerActor": 1
+    }
+  ]
+}
