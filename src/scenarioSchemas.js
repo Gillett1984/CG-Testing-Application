@@ -217,6 +217,8 @@ export const behaviorExecutionResultSchema = z.object({
   behaviorIds: z.array(z.string().min(1)).min(1),
   assignedFatigueLevel: fatigueLevelSchema.optional(),
   observedQfi: z.number().min(0).max(100).optional(),
+  observedIntent: z.string().optional(),
+  observedQor: z.string().optional(),
   syntheticUserCompliant: z.boolean(),
   partnerAiExpectationObserved: z.boolean().optional(),
   softAssertions: z.array(z.object({

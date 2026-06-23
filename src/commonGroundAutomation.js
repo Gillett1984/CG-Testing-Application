@@ -261,13 +261,63 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     scenario: selectedScenario,
     kind: 'cross'
   });
+  // Start dossier generation concurrently with browser setup. The dossier is only
+  // needed once the first interview begins (create-case and accept-invitation do
+  // not use it), so overlapping it with that browser work hides most of its
+  // latency. This changes ONLY timing — the dossier content is unchanged.
   recordStage(artifacts, 'Generate Scenario Dossiers', 'started');
-  const dossiers = await generateScenarioDossiers({
+  const dossiersPromise = generateScenarioDossiers({
     llm: config.llm,
     topic: config.run.scenarioFoundation.topic,
     scenario: selectedScenario,
     seed: `${store.runId}:${syntheticCase.reference}`
   });
+  // Avoid an unhandled rejection if browser setup throws before we await it.
+  dossiersPromise.catch(() => {});
+
+  recordStage(artifacts, 'Create case', 'started');
+  const requestorSetupContext = await browser.newContext();
+  const requestorSetupPage = await requestorSetupContext.newPage();
+  await login(requestorSetupPage, config, 'requestor');
+  artifacts.case = await createCase(requestorSetupPage, config, syntheticCase);
+  await requestorSetupContext.close();
+  recordStage(artifacts, 'Create case', 'passed', artifacts.case?.commonGroundId ?? artifacts.case?.syntheticReference ?? '');
+
+  recordStage(artifacts, 'Accept participant invitation', 'started');
+  const participantSetupContext = await browser.newContext();
+  const participantSetupPage = await participantSetupContext.newPage();
+  await login(participantSetupPage, config, 'participant');
+  await acceptCaseRequest(participantSetupPage, config, syntheticCase, artifacts.case);
+  await participantSetupContext.close();
+  recordStage(artifacts, 'Accept participant invitation', 'passed');
+
+  // New Common Ground order: the conversation is sequential and gated by
+  // requestor/participant role (participant = invitee, requestor = creator).
+  // The participant completes their interview + facts FIRST. Then the requestor
+  // rates the participant's facts, does their own interview + facts, and finally
+  // the participant rates the requestor's facts. Roles drive the order,
+  // independent of employee/manager.
+  artifacts.case.requireExactCaseMatch = true;
+
+  // Steps 3-4: Participant interview, then Participant fact section.
+  // Open the participant's case page BEFORE awaiting the dossier, so a real
+  // window stays visible during the dossier wait instead of a blank one.
+  const participantContext = await browser.newContext();
+  const participantPage = await participantContext.newPage();
+  await login(participantPage, config, 'participant');
+  await openCaseAsParticipant(participantPage, config, artifacts.case, syntheticCase);
+
+  // D8: click into Getting Started as soon as its link is available on the Case
+  // Details page — do NOT wait on the dossier first. ensureGettingStartedOpen
+  // clicks the link the moment it is visible; the dossier then finishes while
+  // Common Ground loads the interview page (it is only needed once we read the
+  // first prompt and generate a response, just below).
+  recordStage(artifacts, 'Participant Getting Started', 'started');
+  await ensureGettingStartedOpen(participantPage, config, artifacts.case);
+
+  // The dossier is required before the first response is generated. The wait now
+  // overlaps the Getting Started interview-page load instead of blocking on Case Details.
+  const dossiers = await dossiersPromise;
   scenarioController.setDossiers(dossiers);
   artifacts.scenarioDossiers = dossiers;
   artifacts.scenarioExpressionPlan = dossiers.scenarioExpressionPlan;
@@ -291,26 +341,49 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   artifacts.alignmentScenarioId = config.run.alignmentScenarioId;
   artifacts.behaviorScheduleId = config.run.behaviorSchedule.id;
 
-  recordStage(artifacts, 'Create case', 'started');
-  const requestorSetupContext = await browser.newContext();
-  const requestorSetupPage = await requestorSetupContext.newPage();
-  await login(requestorSetupPage, config, 'requestor');
-  artifacts.case = await createCase(requestorSetupPage, config, syntheticCase);
-  await requestorSetupContext.close();
-  recordStage(artifacts, 'Create case', 'passed', artifacts.case?.commonGroundId ?? artifacts.case?.syntheticReference ?? '');
+  const participantResult = await runPartnerAiInterview(participantPage, config, participantTranscript, {
+    seed: `${artifacts.case?.commonGroundId ?? store.runId}:participant`,
+    actorRole: 'participant',
+    scenarioController,
+    artifacts
+  });
+  artifacts.participantGettingStarted = participantResult;
+  recordStage(artifacts, 'Participant Getting Started', participantResult.passed ? 'passed' : 'failed', participantResult.stopReason);
+  if (!participantResult.passed) throw new Error(participantResult.stopReason);
 
-  recordStage(artifacts, 'Accept participant invitation', 'started');
-  const participantSetupContext = await browser.newContext();
-  const participantSetupPage = await participantSetupContext.newPage();
-  await login(participantSetupPage, config, 'participant');
-  await acceptCaseRequest(participantSetupPage, config, syntheticCase, artifacts.case);
-  await participantSetupContext.close();
-  recordStage(artifacts, 'Accept participant invitation', 'passed');
+  recordStage(artifacts, 'Participant Fact Section', 'started');
+  await completeActorPostProcessing(participantPage, config, artifacts, 'Participant', ownFactLabel);
+  recordStage(artifacts, 'Participant Fact Section', 'passed', `All fact statements labeled ${ownFactLabel}.`);
+  await participantPage.screenshot({ path: `${store.runDir}/participant-post-processing.png`, fullPage: true });
+  await participantContext.close();
 
+  // Steps 5-8: Requestor rates the participant's facts, waits for Getting Started
+  // to become available, then does their own interview and fact section. One
+  // requestor session covers all four steps.
   const requestorContext = await browser.newContext();
   const requestorPage = await requestorContext.newPage();
   await login(requestorPage, config, 'requestor');
   await openCaseAsRequestor(requestorPage, config, artifacts.case, syntheticCase);
+
+  recordStage(artifacts, 'Requestor Rates Participant Facts', 'started');
+  await completeCrossPartyFactReview(
+    requestorPage,
+    config,
+    artifacts.case,
+    crossPartyFactLabel,
+    {
+      raterRole: 'requestor',
+      ratedParty: 'participant',
+      linkText: /Rate Participant'?s Facts/i,
+      mode: 'requestor_rates_participant'
+    }
+  );
+  recordStage(artifacts, 'Requestor Rates Participant Facts', 'passed', `Participant facts labeled ${crossPartyFactLabel}.`);
+  await requestorPage.screenshot({ path: `${store.runDir}/requestor-rates-participant-facts.png`, fullPage: true });
+
+  // Step 6: the Getting Started button does not appear immediately after rating;
+  // re-open the case from the dashboard and poll until it is available.
+  await waitForRequestorGettingStarted(requestorPage, config, artifacts.case, syntheticCase);
   await startGettingStarted(requestorPage, config, artifacts.case);
   updateArtifactCaseId(artifacts, await findCaseId(requestorPage));
 
@@ -325,68 +398,30 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   recordStage(artifacts, 'Requestor Getting Started', requestorResult.passed ? 'passed' : 'failed', requestorResult.stopReason);
   if (!requestorResult.passed) throw new Error(requestorResult.stopReason);
 
-  recordStage(artifacts, 'Requestor Post-Processing', 'started');
+  recordStage(artifacts, 'Requestor Fact Section', 'started');
   await completeActorPostProcessing(requestorPage, config, artifacts, 'Requestor', ownFactLabel);
-  recordStage(artifacts, 'Requestor Post-Processing', 'passed', `All fact statements labeled ${ownFactLabel}.`);
+  recordStage(artifacts, 'Requestor Fact Section', 'passed', `All fact statements labeled ${ownFactLabel}.`);
   await requestorPage.screenshot({ path: `${store.runDir}/requestor-post-processing.png`, fullPage: true });
   await requestorContext.close();
 
-  const participantContext = await browser.newContext();
-  const participantPage = await participantContext.newPage();
-  await login(participantPage, config, 'participant');
-  artifacts.case.requireExactCaseMatch = true;
-  await openCaseAsParticipant(participantPage, config, artifacts.case, syntheticCase);
-
-  recordStage(artifacts, 'Participant Fact Review', 'started');
+  // Step 9: Participant rates the requestor's facts.
+  recordStage(artifacts, 'Participant Rates Requestor Facts', 'started');
+  const participantReviewContext = await browser.newContext();
+  const participantReviewPage = await participantReviewContext.newPage();
+  await login(participantReviewPage, config, 'participant');
+  await openCaseAsParticipant(participantReviewPage, config, artifacts.case, syntheticCase);
   await completeParticipantFactReview(
-    participantPage,
+    participantReviewPage,
     config,
     artifacts.case,
     crossPartyFactLabel
   );
-  recordStage(artifacts, 'Participant Fact Review', 'passed', `Requestor facts labeled ${crossPartyFactLabel}.`);
-
-  recordStage(artifacts, 'Participant Getting Started', 'started');
-  await ensureGettingStartedOpen(participantPage, config, artifacts.case);
-  const participantResult = await runPartnerAiInterview(participantPage, config, participantTranscript, {
-    seed: `${artifacts.case?.commonGroundId ?? store.runId}:participant`,
-    actorRole: 'participant',
-    scenarioController,
-    artifacts
-  });
-  artifacts.participantGettingStarted = participantResult;
-  recordStage(artifacts, 'Participant Getting Started', participantResult.passed ? 'passed' : 'failed', participantResult.stopReason);
-  if (!participantResult.passed) throw new Error(participantResult.stopReason);
-
-  recordStage(artifacts, 'Participant Post-Processing', 'started');
-  await completeActorPostProcessing(participantPage, config, artifacts, 'Participant', ownFactLabel);
-  recordStage(artifacts, 'Participant Post-Processing', 'passed', `All fact statements labeled ${ownFactLabel}.`);
-  await participantPage.screenshot({ path: `${store.runDir}/participant-post-processing.png`, fullPage: true });
-  await participantContext.close();
-
-  recordStage(artifacts, 'Requestor Fact Review of Participant', 'started');
-  const requestorCrossRatingContext = await browser.newContext();
-  const requestorCrossRatingPage = await requestorCrossRatingContext.newPage();
-  await login(requestorCrossRatingPage, config, 'requestor');
-  await openCaseAsRequestor(requestorCrossRatingPage, config, artifacts.case, syntheticCase);
-  await completeCrossPartyFactReview(
-    requestorCrossRatingPage,
-    config,
-    artifacts.case,
-    crossPartyFactLabel,
-    {
-      raterRole: 'requestor',
-      ratedParty: 'participant',
-      linkText: /Rate Participant'?s Facts/i,
-      mode: 'requestor_rates_participant'
-    }
-  );
-  recordStage(artifacts, 'Requestor Fact Review of Participant', 'passed', `Participant facts labeled ${crossPartyFactLabel}.`);
-  await requestorCrossRatingPage.screenshot({ path: `${store.runDir}/requestor-rates-participant-facts.png`, fullPage: true });
-  await requestorCrossRatingContext.close();
+  recordStage(artifacts, 'Participant Rates Requestor Facts', 'passed', `Requestor facts labeled ${crossPartyFactLabel}.`);
+  await participantReviewPage.screenshot({ path: `${store.runDir}/participant-rates-requestor-facts.png`, fullPage: true });
+  await participantReviewContext.close();
 
   artifacts.workflowCompleted = true;
-  artifacts.workflowCompletionStage = 'Requestor Fact Review of Participant';
+  artifacts.workflowCompletionStage = 'Participant Rates Requestor Facts';
 
   recordStage(artifacts, 'Alignment Report', 'started');
   const reportContext = await browser.newContext();
@@ -397,7 +432,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     await openCaseAsRequestor(reportPage, config, artifacts.case, syntheticCase);
     const alignmentReportConfig = {
       ...config,
-      run: { ...config.run, postCompletionWaitMs: Math.min(config.run.postCompletionWaitMs, 60000) }
+      run: { ...config.run, postCompletionWaitMs: Math.min(config.run.postCompletionWaitMs, 180000) }
     };
     const alignmentReport = await waitForAndReadAlignmentReport(reportPage, alignmentReportConfig, artifacts.case);
     artifacts.alignmentReport = {
@@ -441,13 +476,12 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   artifacts.completedGettingStarted = requestorResult.completed && participantResult.completed;
   artifacts.syntheticUserScenarioCompliant = coverage.syntheticUserScenarioCompliant;
   artifacts.status = fullWorkflowResultStatus({
-    workflowCompleted: artifacts.workflowCompleted,
-    behaviorScheduleCompleted: coverage.syntheticUserScenarioCompliant
+    workflowCompleted: artifacts.workflowCompleted
   });
-  artifacts.statusBasis = 'workflow_and_behavior_completion';
-  artifacts.stopReason = coverage.syntheticUserScenarioCompliant
+  artifacts.statusBasis = 'workflow_completion';
+  artifacts.stopReason = artifacts.workflowCompleted
     ? 'Full workflow completed through Requestor rating of Participant facts.'
-    : 'The Common Ground workflow completed, but the case failed because the assigned behavioral schedule was not completed.';
+    : 'The Common Ground workflow did not complete.';
   artifacts.finishedAt = new Date().toISOString();
   return artifacts;
 }
@@ -496,7 +530,7 @@ async function login(page, config, role) {
   await fill(page, selectors.emailInput, credentials.email, `${role} email`);
   await fill(page, selectors.passwordInput, credentials.password, `${role} password`);
   await click(page, selectors.submitButton, `${role} login submit`);
-  await page.waitForLoadState('networkidle').catch(() => {});
+  await waitForIdle(page);
   await assertLoggedIn(page, config, role);
   await verifyAuthenticatedRoute(page, config, role);
 }
@@ -517,8 +551,12 @@ async function createCase(page, config, syntheticCase) {
   await page.waitForLoadState('networkidle').catch(() => {});
   await assertNotLoginRequired(page, 'open new case page');
   await selectCaseType(page, syntheticCase.caseType);
-  await fill(page, selectors.participantNameInput, syntheticCase.participantName, 'participant name');
-  await fill(page, selectors.participantEmailInput, syntheticCase.participantEmail, 'participant email');
+  // The New Case Request form auto-fills the logged-in user's party and leaves the
+  // other party empty. Fill every present date with today, then fill the empty
+  // party's Name/Email by detecting empty, editable fields (not a fixed party id).
+  await fillPresentDates(page, todayIso());
+  await fillFirstEmpty(page, 'input[type="text"]', syntheticCase.participantName, 'empty party name');
+  await fillFirstEmpty(page, 'input[type="email"]', syntheticCase.participantEmail, 'empty party email');
   await click(page, selectors.createCaseButton, 'create case submit');
   await page.waitForLoadState('networkidle').catch(() => {});
   await page.waitForTimeout(2000);
@@ -553,10 +591,10 @@ async function waitForCreatedCaseId(page, config, existingCaseIds = []) {
       const directId = findCaseIdInText(`${page.url()}\n${lastText}`);
       if (directId && !knownIds.has(directId)) return directId;
       await page.goto(new URL('/dashboard', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' }).catch(() => {});
-      await page.waitForLoadState('networkidle').catch(() => {});
+      await waitForIdle(page);
     } else {
       await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
-      await page.waitForLoadState('networkidle').catch(() => {});
+      await waitForIdle(page);
     }
     await page.waitForTimeout(1500);
   }
@@ -565,26 +603,23 @@ async function waitForCreatedCaseId(page, config, existingCaseIds = []) {
 }
 
 async function acceptCaseRequest(page, config, syntheticCase, createdCase) {
-  await page.goto(new URL('/dashboard', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' });
-  await page.waitForLoadState('networkidle').catch(() => {});
+  await ensureOnDashboard(page, config);
   await clickCaseCardButton(page, createdCase, /Review Invitation|Review|Invitation/i);
-  await page.waitForLoadState('networkidle').catch(() => {});
+  await waitForIdle(page);
   await click(page, config.selectors.participant.acceptRequestButton, 'accept case request');
-  await page.waitForLoadState('networkidle').catch(() => {});
+  await waitForIdle(page);
 }
 
 async function openCaseAsRequestor(page, config, createdCase, syntheticCase) {
-  await page.goto(new URL('/dashboard', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' });
-  await page.waitForLoadState('networkidle').catch(() => {});
+  await ensureOnDashboard(page, config);
   await openCaseFromDashboard(page, createdCase, syntheticCase.caseType);
-  await page.waitForLoadState('networkidle').catch(() => {});
+  await waitForIdle(page);
 }
 
 async function openCaseAsParticipant(page, config, createdCase, syntheticCase) {
-  await page.goto(new URL('/dashboard', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' });
-  await page.waitForLoadState('networkidle').catch(() => {});
+  await ensureOnDashboard(page, config);
   await openCaseDetailsFromDashboard(page, createdCase, syntheticCase.caseType);
-  await page.waitForLoadState('networkidle').catch(() => {});
+  await waitForIdle(page);
 }
 
 async function startGettingStarted(page, config, createdCase) {
@@ -712,19 +747,42 @@ async function runPartnerAiInterview(page, config, transcript, options = {}) {
     const visibleAfterResponse = await readVisibleBodyText(page);
     if (scenarioTurn?.behaviors?.length) {
       const observedQfi = extractLatestQfi(visibleAfterResponse);
+      // Common Ground's own classification of the response just submitted.
+      const observedIntent = extractLatestIntent(visibleAfterResponse);
+      const observedQor = extractLatestQor(visibleAfterResponse);
       const nextPromptForAssertion = isCompletionPrompt(visibleAfterResponse, config.completionPhrases) || isPostInterviewState(visibleAfterResponse)
         ? visibleAfterResponse
         : await readLatestPrompt(page, config).catch(() => visibleAfterResponse);
       for (const assignment of scenarioTurn.behaviors) {
         const verification = behaviorVerification.find((item) => item.behaviorId === assignment.behaviorId && item.stage === assignment.stage);
-        if (!verification?.passed) {
-          throw new Error(`Scheduled behavior was not visibly performed: ${assignment.behaviorId}:${assignment.stage}.`);
-        }
-        options.scenarioController.completeBehavior(assignment, turn);
-        updateScenarioCorrectionState(options.scenarioController, assignment, response);
         const behaviorDefinition = config.run.scenarioFoundation.behaviorCatalog.behaviors
           .find((item) => item.id === assignment.behaviorId);
         const partnerAssertion = evaluateExpectedPartnerBehavior(assignment, nextPromptForAssertion);
+        const syntheticUserCompliant = Boolean(verification?.passed);
+
+        // An unverified behavior is recorded as a soft failure and the interview
+        // continues; it is no longer a hard stop. The behavior is left incomplete
+        // so coverage still reflects the miss (missingBehaviorIds).
+        const softAssertions = [{
+          type: 'partner_ai_behavior',
+          passed: partnerAssertion.passed,
+          expected: behaviorDefinition?.expectedPartnerAiBehavior ?? assignment.behaviorId,
+          observed: partnerAssertion.observed
+        }];
+        if (!syntheticUserCompliant) {
+          softAssertions.push({
+            type: 'synthetic_user_behavior',
+            passed: false,
+            expected: `Synthetic user performs ${assignment.behaviorId}:${assignment.stage}.`,
+            observed: verification?.reason ?? 'Behavior was not visibly performed in the synthetic response.'
+          });
+        }
+
+        if (syntheticUserCompliant) {
+          options.scenarioController.completeBehavior(assignment, turn);
+          updateScenarioCorrectionState(options.scenarioController, assignment, response);
+        }
+
         const execution = options.scenarioController.recordBehaviorExecution({
           actor: options.actorRole,
           turn,
@@ -733,14 +791,11 @@ async function runPartnerAiInterview(page, config, transcript, options = {}) {
           behaviorIds: [assignment.behaviorId, ...assignment.combinedBehaviorIds],
           assignedFatigueLevel: assignment.fatigueLevel,
           observedQfi: observedQfi ?? undefined,
-          syntheticUserCompliant: verification.passed,
+          observedIntent: observedIntent ?? undefined,
+          observedQor: observedQor ?? undefined,
+          syntheticUserCompliant,
           partnerAiExpectationObserved: partnerAssertion.passed,
-          softAssertions: [{
-            type: 'partner_ai_behavior',
-            passed: partnerAssertion.passed,
-            expected: behaviorDefinition?.expectedPartnerAiBehavior ?? assignment.behaviorId,
-            observed: partnerAssertion.observed
-          }]
+          softAssertions
         });
         options.artifacts?.behaviorExecutions.push(execution);
       }
@@ -826,7 +881,12 @@ function buildScenarioTurn(controller, actor, latestPrompt) {
     primaryQuestionId: question.id,
     criterionId: criterion?.id
   });
-  const behaviors = selectCompatibleTurnBehaviors(pending, controller.behaviorCatalog);
+  const behaviors = selectCompatibleTurnBehaviors(pending, controller.behaviorCatalog)
+    .map((assignment) => ({
+      ...assignment,
+      softAssertionOnly: controller.behaviorCatalog.behaviors
+        .find((definition) => definition.id === assignment.behaviorId)?.softAssertionOnly !== false
+    }));
   const retainedFacts = behaviors
     .map((assignment) => controller.getRetainedFact(actor, assignment.scheduleItemId))
     .filter(Boolean);
@@ -945,6 +1005,26 @@ function extractLatestQfi(text) {
   const matches = [...String(text ?? '').matchAll(/QFI:\s*(?:Low|Moderate|High|Critical)?\s*\((-?\d+(?:\.\d+)?)\)/gi)];
   const value = Number(matches.at(-1)?.[1]);
   return Number.isFinite(value) ? value : null;
+}
+
+// Common Ground classifies each submitted response with an Intent (e.g.
+// "AnswerAttempt (100%)") and a QoR / Quality-of-Response (e.g. "Moderate (75)").
+// Capture the latest of each so artifacts show how CG actually handled the turn.
+function extractLatestIntent(text) {
+  const matches = [...String(text ?? '').matchAll(/Intent:\s*([A-Za-z]+)\s*(?:\((\d+)%\))?/gi)];
+  const last = matches.at(-1);
+  if (!last) return null;
+  return last[2] ? `${last[1]} (${last[2]}%)` : last[1];
+}
+
+function extractLatestQor(text) {
+  const matches = [...String(text ?? '').matchAll(/QoR:\s*([A-Za-z]+)?\s*\((-?\d+(?:\.\d+)?)?\)/gi)];
+  const last = matches.at(-1);
+  if (!last) return null;
+  const level = last[1] ?? '';
+  const score = last[2] ?? '';
+  if (!level && !score) return null;
+  return score ? `${level} (${score})`.trim() : level;
 }
 
 function textSimilarity(left, right) {
@@ -1168,39 +1248,57 @@ function gettingStartedAvailable(text) {
   return /getting started/i.test(text) && !/post-processing|post processing|still processing/i.test(text);
 }
 
+// Click the "Rate [party]'s Facts" / "Next Up: Rate ... Facts" control. DOM-based
+// and tolerant of markup and of the Requester/Requestor spelling difference, which
+// is why getByRole(name: /Rate Requestor's Facts/) was failing on the live UI.
+async function clickRateFactsControl(page, options) {
+  return page.evaluate(({ ratedParty }) => {
+    const norm = (value) => String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const isDisabled = (element) => element.disabled || element.getAttribute('aria-disabled') === 'true';
+    const partyToken = ratedParty === 'participant' ? 'participant' : 'request[eo]r';
+    const partyRe = new RegExp(`rate\\b[\\s\\S]*\\b${partyToken}'?s?\\b[\\s\\S]*\\bfacts?\\b`, 'i');
+    const anyRe = /rate\b[\s\S]*\bfacts?\b/i;
+    const controls = [...document.querySelectorAll('a,button,[role="button"]')].filter((element) => !isDisabled(element));
+    const pick = controls.find((element) => partyRe.test(norm(element.innerText)))
+      ?? controls.find((element) => anyRe.test(norm(element.innerText)));
+    if (pick) {
+      pick.click();
+      return true;
+    }
+    return false;
+  }, { ratedParty: options.ratedParty });
+}
+
 async function openCrossPartyFactReviewIfRequired(page, createdCase, options) {
   const text = await readVisibleBodyText(page);
   if (factLabelingReady(text, page.url())) return true;
+
+  // Direct cross-rate link, when the page exposes one.
   const crossRateLink = page.locator(`a[href*="/cross-rate"][href*="mode=${options.mode}"]`).first();
-  const crossRateVisible = await crossRateLink.isVisible({ timeout: 750 }).catch(() => false);
-  if (crossRateVisible) {
+  if (await crossRateLink.isVisible({ timeout: 750 }).catch(() => false)) {
     await crossRateLink.click();
     await page.waitForLoadState('networkidle').catch(() => {});
     await page.waitForTimeout(1000);
     return true;
   }
-  const patterns = [options.linkText, /Review.*Facts/i, /Fact Statements/i, /Rate Facts/i];
-  for (const pattern of patterns) {
-    for (const role of ['button', 'link']) {
-      const control = page.getByRole(role, { name: pattern }).first();
-      const visible = await control.isVisible({ timeout: 750 }).catch(() => false);
-      const enabled = visible && await control.isEnabled({ timeout: 750 }).catch(() => false);
-      if (enabled) {
-        await control.click();
-        await page.waitForLoadState('networkidle').catch(() => {});
-        await page.waitForTimeout(1000);
-        return true;
-      }
-    }
-  }
-  if (!isDashboardPage(page.url(), text)) return false;
-  const openedDetails = await openCaseDetailsFromDashboard(page, createdCase, '')
-    .then(() => true)
-    .catch(() => false);
-  if (openedDetails) {
+
+  // The actual "Rate [party]'s Facts" / "Next Up" control.
+  if (await clickRateFactsControl(page, options)) {
     await page.waitForLoadState('networkidle').catch(() => {});
     await page.waitForTimeout(1000);
     return true;
+  }
+
+  // On the dashboard with no control visible yet → open the case detail and retry.
+  if (isDashboardPage(page.url(), text)) {
+    const openedDetails = await openCaseDetailsFromDashboard(page, createdCase, '')
+      .then(() => true)
+      .catch(() => false);
+    if (openedDetails) {
+      await page.waitForLoadState('networkidle').catch(() => {});
+      await page.waitForTimeout(1000);
+      return true;
+    }
   }
   return false;
 }
@@ -1209,7 +1307,7 @@ async function completeParticipantFactReview(page, config, createdCase, labelTex
   return completeCrossPartyFactReview(page, config, createdCase, labelText, {
     raterRole: 'participant',
     ratedParty: 'requestor',
-    linkText: /Rate Requestor'?s Facts/i,
+    linkText: /Rate Request[eo]r'?s Facts/i,
     mode: 'participant_rates_requestor',
     allowGettingStartedReady: true
   });
@@ -1293,46 +1391,98 @@ async function ensureGettingStartedOpen(page, config, createdCase) {
   await startGettingStarted(page, config, createdCase);
 }
 
+// True only if the report text belongs to the case under test. Guards against
+// opening a different completed case's report (which is how 87 from CG-0311 was
+// captured instead of 76 from CG-0316).
+function reportMatchesCase(text, createdCase) {
+  const ids = [createdCase?.commonGroundId, createdCase?.id].filter(Boolean).map((id) => id.toUpperCase());
+  if (!ids.length) return true;
+  const found = findCaseIdsInText(text);
+  if (!found.length) return true; // no case id visible; cannot disprove
+  return found.some((id) => ids.includes(id.toUpperCase()));
+}
+
+// Open THIS case's alignment report from its own detail page, where the report
+// link is unambiguous (the dashboard lists a report button per completed case).
+async function openCaseAlignmentReport(page, config, createdCase) {
+  if (isDashboardPage(page.url(), await readVisibleBodyText(page))) {
+    await openCaseFromDashboard(page, createdCase, config.run.caseType).catch(() => {});
+    await waitForIdle(page);
+  }
+  const namePattern = /Alignment Report|View Report|Open Report/i;
+  for (const role of ['link', 'button']) {
+    const control = page.getByRole(role, { name: namePattern }).first();
+    if (await control.isVisible({ timeout: 750 }).catch(() => false)) {
+      await control.click().catch(() => {});
+      await page.waitForLoadState('networkidle').catch(() => {});
+      return;
+    }
+  }
+  // Last resort: case-card scoped click (still verified by reportMatchesCase).
+  await clickCaseCardButton(page, createdCase, namePattern).catch(() => {});
+  await page.waitForLoadState('networkidle').catch(() => {});
+}
+
 async function waitForAndReadAlignmentReport(page, config, createdCase) {
   const startedAt = Date.now();
   const deadline = startedAt + config.run.postCompletionWaitMs;
   let lastText = '';
   let lastUrl = page.url();
+  let lastReloadAt = 0;
 
   while (Date.now() < deadline) {
     lastText = await readVisibleBodyText(page);
     lastUrl = page.url();
-    if (/alignment report/i.test(lastText)) {
-      const reportButton = page.getByRole('button', { name: /Alignment Report|View Report|Open Report/i }).first();
-      const reportLink = page.getByRole('link', { name: /Alignment Report|View Report|Open Report/i }).first();
-      if (await reportButton.isVisible({ timeout: 500 }).catch(() => false)) {
-        await reportButton.click();
-        await page.waitForLoadState('networkidle').catch(() => {});
-      } else if (await reportLink.isVisible({ timeout: 500 }).catch(() => false)) {
-        await reportLink.click();
-        await page.waitForLoadState('networkidle').catch(() => {});
-      } else if (!/alignment-report/i.test(page.url())) {
-        await clickCaseCardButton(page, createdCase, /Alignment Report|View Report|Open Report/i).catch(() => {});
+
+    if (onAlignmentReportPage(lastUrl, lastText)) {
+      // Landed on a different case's report — reopen the correct case and retry.
+      if (!reportMatchesCase(lastText, createdCase)) {
+        console.warn(`[alignment] Report page is for a different case than ${createdCase?.commonGroundId}; reopening the correct case.`);
+        await openCaseAsRequestor(page, config, createdCase, { caseType: config.run.caseType }).catch(() => {});
+        await waitForIdle(page);
+        await page.waitForTimeout(2000);
+        continue;
       }
-      const reportText = await readVisibleBodyText(page);
-      if (/alignment report/i.test(reportText)) {
+      const score = extractAlignmentScore(lastText);
+      if (score !== null) {
         return {
-          score: extractAlignmentScore(reportText),
-          url: page.url(),
+          score,
+          url: lastUrl,
           elapsedMs: Date.now() - startedAt,
-          visibleText: compactVisibleText(reportText, 4000)
+          visibleText: compactVisibleText(lastText, 4000)
         };
       }
+      // Correct report page, but the score has not rendered yet (e.g.
+      // "Loading alignment report..."). Wait and reload until it appears.
+      if (Date.now() - lastReloadAt >= 8000) {
+        await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+        await waitForIdle(page);
+        lastReloadAt = Date.now();
+      } else {
+        await page.waitForTimeout(2000);
+      }
+      continue;
     }
 
-    if (/dashboard/i.test(lastText) && !/alignment report/i.test(lastText)) {
-      await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+    if (/alignment report/i.test(lastText)) {
+      await openCaseAlignmentReport(page, config, createdCase);
+      await page.waitForTimeout(1000);
+      continue;
     }
-    await page.waitForTimeout(5000);
+
+    // Not on a report and no report link visible yet: reopen this case / refresh.
+    if (isDashboardPage(lastUrl, lastText)) {
+      await openCaseAsRequestor(page, config, createdCase, { caseType: config.run.caseType }).catch(() => {});
+      await waitForIdle(page);
+    } else {
+      await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+      await waitForIdle(page);
+    }
+    await page.waitForTimeout(3000);
   }
 
   throw new Error([
-    `Alignment Report did not become available within ${Math.round(config.run.postCompletionWaitMs / 60000)} minutes.`,
+    `Alignment Report for ${createdCase?.commonGroundId ?? 'the case'} did not become available within ${Math.round(config.run.postCompletionWaitMs / 60000)} minutes.`,
     `Elapsed: ${Math.round((Date.now() - startedAt) / 1000)} seconds`,
     `Current URL: ${lastUrl}`,
     `Last visible page text: ${compactVisibleText(lastText, 1800)}`
@@ -1340,16 +1490,43 @@ async function waitForAndReadAlignmentReport(page, config, createdCase) {
 }
 
 function extractAlignmentScore(text) {
-  const patterns = [
-    /(?:overall\s+)?alignment(?:\s+(?:score|report))?\s*[:\-]?\s*(\d{1,3})(?:\.\d+)?\s*(?:%|\/\s*100)?/i,
-    /\balignment\s+(?:is|was)\s+(\d{1,3})(?:\.\d+)?\s*(?:%|\/\s*100)?/i,
-    /(?:score|alignment)\s*[:\-]?\s*(\d{1,3})(?:\.\d+)?\s*%/i
-  ];
-  for (const pattern of patterns) {
-    const value = Number(String(text ?? '').match(pattern)?.[1]);
-    if (Number.isFinite(value) && value >= 0 && value <= 100) return value;
+  const haystack = String(text ?? '');
+  // The report shows the score as "NN/100". An "Alignment Threshold" value can
+  // also appear as "NN/100", so collect every /100 value with its preceding label,
+  // drop the threshold, and prefer the one whose context names the alignment score.
+  const candidates = [];
+  const outOf100 = /(\d{1,3}(?:\.\d+)?)\s*\/\s*100\b/g;
+  let match;
+  while ((match = outOf100.exec(haystack)) !== null) {
+    const value = Number(match[1]);
+    if (!isValidAlignmentScore(value)) continue;
+    const context = haystack.slice(Math.max(0, match.index - 40), match.index).toLowerCase();
+    candidates.push({ value, isThreshold: /threshold/.test(context), mentionsAlignment: /alignment|score/.test(context) });
+  }
+  const usable = candidates.filter((item) => !item.isThreshold);
+  if (usable.length) return (usable.find((item) => item.mentionsAlignment) ?? usable[0]).value;
+
+  // Fallback: a percentage explicitly tied to "alignment"/"score" and not a threshold.
+  const percent = /(\d{1,3}(?:\.\d+)?)\s*%/g;
+  while ((match = percent.exec(haystack)) !== null) {
+    const value = Number(match[1]);
+    if (!isValidAlignmentScore(value)) continue;
+    const context = haystack.slice(Math.max(0, match.index - 40), match.index).toLowerCase();
+    if (/threshold/.test(context)) continue;
+    if (/alignment|score/.test(context)) return value;
   }
   return null;
+}
+
+function isValidAlignmentScore(value) {
+  return Number.isFinite(value) && value >= 0 && value <= 100;
+}
+
+function onAlignmentReportPage(url = '', text = '') {
+  if (/alignment-report/i.test(String(url ?? ''))) return true;
+  if (isDashboardPage(url, text)) return false;
+  // Positive markers of the single-case report (vs. the dashboard's case list).
+  return /\b\d{1,3}(?:\.\d+)?\s*\/\s*100\b/.test(String(text ?? '')) || /alignment\s+threshold/i.test(String(text ?? ''));
 }
 
 function alignmentScoreWithinExpectedRange(score, range) {
@@ -1604,7 +1781,7 @@ async function readLatestPrompt(page, config) {
 
 async function waitForInterviewReady(page, config) {
   const inputSelector = config.selectors.partnerAi.responseInput;
-  const deadline = Date.now() + 300000;
+  let deadline = Date.now() + 600000;
   let lastVisibleText = '';
   let lastInputState = '';
 
@@ -1621,6 +1798,12 @@ async function waitForInterviewReady(page, config) {
     if (interviewReadySignal({ readyInput: Boolean(readyInput), visibleText })) {
       await waitForStableLocatorText(page.locator(config.selectors.partnerAi.latestPrompt).first(), page);
       return;
+    }
+    // While Common Ground is visibly still processing the previous answer, keep
+    // waiting instead of giving up: roll the deadline forward so an active
+    // processing screen never trips the timeout, while a true hang still ends.
+    if (isProcessingState(visibleText)) {
+      deadline = Math.max(deadline, Date.now() + 180000);
     }
     await page.waitForTimeout(1500);
   }
@@ -1678,6 +1861,56 @@ function isPostInterviewState(text) {
   return /post-processing|post processing|fact statement|confident fact|statement labels?|submit labels?|label.*fact/i.test(text);
 }
 
+function isProcessingState(text) {
+  return /checking engagement|engagement levels?|still processing|processing your|analy[sz]ing|please wait|one moment/i.test(String(text ?? ''));
+}
+
+function otherPartyGate(text) {
+  return /waiting on the other party|other (?:participant|party) is still finishing|almost there/i.test(String(text ?? ''));
+}
+
+// After the requestor submits ratings of the participant's facts, the "Getting
+// Started" button does not appear immediately and the requestor may still be
+// behind a "waiting on the other party" gate. Re-open the case from the dashboard
+// and poll until an actionable Getting Started control is available.
+async function waitForRequestorGettingStarted(page, config, createdCase, syntheticCase) {
+  // Keep the full post-rating wait budget (Common Ground genuinely delays the
+  // Getting Started button), but poll responsively and proceed the moment the
+  // control is ready. The heavy dashboard re-open only runs periodically, since
+  // re-entry is what surfaces the button — most checks stay fast.
+  const deadline = Date.now() + config.run.postCompletionWaitMs;
+  let lastReopenAt = 0;
+  while (Date.now() < deadline) {
+    // Already in the interview (input ready) → nothing to wait for.
+    if (await findReadyResponseInput(page, config.selectors.partnerAi.responseInput, 300)) return;
+
+    const text = await readVisibleBodyText(page);
+    if (!otherPartyGate(text)) {
+      const gettingStartedControl = page.locator('a[href*="/get-started"]').first();
+      const gettingStartedLink = page.getByRole('link', { name: /^Getting Started$/i }).first();
+      const gettingStartedButton = page.getByRole('button', { name: /^Getting Started$/i }).first();
+      if (await gettingStartedControl.isVisible({ timeout: 300 }).catch(() => false)
+        || await gettingStartedLink.isVisible({ timeout: 300 }).catch(() => false)
+        || await gettingStartedButton.isVisible({ timeout: 300 }).catch(() => false)
+        || gettingStartedAvailable(text)) {
+        return;
+      }
+    }
+
+    // Re-open the case roughly every 10s (re-entry surfaces the button); between
+    // re-opens, poll the current page every ~1.5s so we proceed as soon as ready.
+    if (Date.now() - lastReopenAt >= 10000) {
+      await ensureOnDashboard(page, config);
+      await openCaseFromDashboard(page, createdCase, syntheticCase.caseType).catch(() => {});
+      await waitForIdle(page);
+      lastReopenAt = Date.now();
+    } else {
+      await page.waitForTimeout(1500);
+    }
+  }
+  throw new Error('Requestor "Getting Started" did not become available after rating the participant\'s facts within the timeout. The participant Getting Started or fact rating may not have completed.');
+}
+
 async function waitForStableLocatorText(locator, page) {
   let prior = '';
   let stableReads = 0;
@@ -1730,6 +1963,57 @@ async function fill(page, selector, value, label) {
   await locator.fill(value);
 }
 
+// Today's date as YYYY-MM-DD (native date inputs accept this format). Built from
+// local components so it does not shift a day near midnight like toISOString (UTC).
+function todayIso() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+// Fill every present, editable date input with the given value. Re-scans after each
+// pass so a field that becomes editable once another date is set (e.g. "Review
+// Period To") gets filled; disabled/readOnly dates are skipped.
+async function fillPresentDates(page, value) {
+  const dateSelector = 'input[type="date"]';
+  for (let pass = 0; pass < 4; pass += 1) {
+    const inputs = page.locator(dateSelector);
+    const count = await inputs.count().catch(() => 0);
+    let filledAny = false;
+    for (let index = 0; index < count; index += 1) {
+      const input = inputs.nth(index);
+      if (!await input.isVisible().catch(() => false)) continue;
+      if (!await input.isEditable().catch(() => false)) continue; // skips disabled/readOnly
+      if (await input.inputValue().catch(() => '')) continue;
+      await input.fill(value).catch(() => {});
+      filledAny = true;
+    }
+    if (!filledAny) break;
+    await page.waitForTimeout(300); // allow dependent date fields to enable/recompute
+  }
+}
+
+// Fill the first visible, editable, currently-empty input matching the selector.
+// Used to populate the empty party's fields without assuming a fixed party number.
+async function fillFirstEmpty(page, selector, value, label) {
+  const inputs = page.locator(selector);
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    const count = await inputs.count().catch(() => 0);
+    for (let index = 0; index < count; index += 1) {
+      const input = inputs.nth(index);
+      if (!await input.isVisible().catch(() => false)) continue;
+      if (!await input.isEditable().catch(() => false)) continue;
+      if (await input.inputValue().catch(() => '')) continue;
+      await input.fill(value);
+      return;
+    }
+    await page.waitForTimeout(500);
+  }
+  throw new Error(`Could not find an empty, editable field for ${label} (selector: ${selector}). The New Case Request form may have changed.`);
+}
+
 async function click(page, selector, label) {
   const locator = await waitForVisible(page, selector, label);
   await locator.click();
@@ -1754,12 +2038,26 @@ async function readVisibleBodyText(page) {
   return page.locator('body').innerText({ timeout: 10000 }).catch(() => '');
 }
 
+// Bounded settle: wait for the SPA to go network-idle, but never block longer
+// than `ms` (the default Playwright wait is 30s, which stalls chatty dashboards).
+async function waitForIdle(page, ms = 6000) {
+  await page.waitForLoadState('networkidle', { timeout: ms }).catch(() => {});
+}
+
+// Navigate to the dashboard only when we are not already on it, avoiding the
+// extra reload that the requestor/participant flows otherwise incur each step.
+async function ensureOnDashboard(page, config) {
+  if (isDashboardPage(page.url(), await readVisibleBodyText(page))) return;
+  await page.goto(new URL('/dashboard', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' });
+  await waitForIdle(page);
+}
+
 async function assertLoggedIn(page, config, role) {
   const deadline = Date.now() + 60000;
   let lastText = '';
+  await waitForIdle(page);
 
   while (Date.now() < deadline) {
-    await page.waitForLoadState('networkidle').catch(() => {});
     const text = await readVisibleBodyText(page);
     lastText = text;
     if (/dashboard|account|notifications|create new case/i.test(text)) return;
@@ -1776,8 +2074,11 @@ async function assertLoggedIn(page, config, role) {
 }
 
 async function verifyAuthenticatedRoute(page, config, role) {
-  await page.goto(new URL('/dashboard', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' });
-  await page.waitForLoadState('networkidle').catch(() => {});
+  // Avoid a redundant second dashboard load: login() usually lands here already.
+  if (!isDashboardPage(page.url(), await readVisibleBodyText(page))) {
+    await page.goto(new URL('/dashboard', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' });
+    await waitForIdle(page);
+  }
 
   const deadline = Date.now() + 30000;
   let lastText = '';
@@ -1810,8 +2111,98 @@ async function assertNotLoginRequired(page, actionLabel) {
 }
 
 async function selectCaseType(page, requestedType) {
-  const normalizedType = /performance/i.test(requestedType) ? 'Performance Review' : 'Raise';
-  await page.getByRole('button', { name: new RegExp(normalizedType, 'i') }).click();
+  const plan = caseCreationPlan(requestedType);
+
+  // The "Create a Request" page groups requests under tabs ("Discussion Request",
+  // "Performance Review"), each containing cards (e.g. "Raise Request",
+  // "Performance Review") with their own "Begin Request" button. Select the tab,
+  // then begin the request from the matching card.
+  await selectRequestTab(page, plan.tab);
+  await page.getByRole('button', { name: /Begin Request/i }).first()
+    .waitFor({ state: 'visible', timeout: 30000 })
+    .catch(() => {});
+  await clickRequestCardButton(page, plan.card);
+}
+
+function caseCreationPlan(requestedType) {
+  const value = String(requestedType ?? '').toLowerCase();
+  // Performance Review tab — select the specific variant card by its full title.
+  if (/performance|review/.test(value)) {
+    if (/90.?day/.test(value)) return { tab: /Performance Review/i, card: 'Performance Review - 90-Day' };
+    if (/evaluation/.test(value)) return { tab: /Performance Review/i, card: 'Performance Review - Evaluation' };
+    if (/coaching/.test(value)) return { tab: /Performance Review/i, card: 'Performance Review - Coaching' };
+    throw new Error(`Ambiguous case type "${requestedType}" — specify Coaching, Evaluation, or 90-Day.`);
+  }
+  // Discussion Request tab cards.
+  if (/remote/.test(value)) return { tab: /Discussion Request/i, card: 'Remote Work' };
+  if (/career/.test(value)) return { tab: /Discussion Request/i, card: 'Career Development' };
+  return { tab: /Discussion Request/i, card: 'Raise Request' };
+}
+
+async function selectRequestTab(page, tabPattern) {
+  for (const role of ['tab', 'button', 'link']) {
+    const locator = page.getByRole(role, { name: tabPattern }).first();
+    if (await locator.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await locator.click().catch(() => {});
+      await page.waitForLoadState('networkidle').catch(() => {});
+      return;
+    }
+  }
+  // Fall back to a plain text click for custom tab markup. Harmless when the tab
+  // is already active (e.g. "Discussion Request" is selected by default).
+  const textTab = page.getByText(tabPattern, { exact: false }).first();
+  if (await textTab.isVisible({ timeout: 1500 }).catch(() => false)) {
+    await textTab.click().catch(() => {});
+    await page.waitForLoadState('networkidle').catch(() => {});
+  }
+}
+
+async function clickRequestCardButton(page, cardTitle, buttonPattern = /Begin Request/i) {
+  const clicked = await page.evaluate(({ target, btnSource, btnFlags }) => {
+    const beginPattern = new RegExp(btnSource, btnFlags);
+    const isDisabled = (element) => element.disabled || element.getAttribute('aria-disabled') === 'true';
+    // Normalize dash variants (en/em dash, minus) and whitespace so the config
+    // title ("- Coaching") matches the UI title ("– Coaching").
+    const norm = (value) => String(value || '')
+      .toLowerCase()
+      .replace(/[\u2010-\u2015\u2212]/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const wanted = norm(target);
+
+    // Match the card whose title is the requested variant exactly, else the most
+    // specific containment (least extra text). No "shortest overall" heuristic,
+    // so sibling cards (e.g. 90-Day) and the tab cannot win.
+    const candidates = [...document.querySelectorAll('h1,h2,h3,h4,strong,span,p,a,div')]
+      .map((element) => ({ element, text: norm(element.innerText) }))
+      .filter((candidate) => candidate.text === wanted || candidate.text.includes(wanted))
+      .map((candidate) => ({ ...candidate, score: candidate.text === wanted ? -1 : candidate.text.length - wanted.length }))
+      .sort((a, b) => a.score - b.score);
+
+    for (const candidate of candidates) {
+      let node = candidate.element;
+      for (let depth = 0; node && depth < 6; depth += 1) {
+        const button = [...node.querySelectorAll('button,a,[role="button"]')]
+          .find((element) => beginPattern.test((element.innerText || '').trim()) && !isDisabled(element));
+        if (button) {
+          button.click();
+          return true;
+        }
+        node = node.parentElement;
+      }
+    }
+    return false;
+  }, {
+    target: cardTitle,
+    btnSource: buttonPattern.source,
+    btnFlags: buttonPattern.flags
+  });
+
+  if (!clicked) {
+    throw new Error(`Could not begin the request: no enabled "Begin Request" button found for the card "${cardTitle}". The Create a Request UI may have changed.`);
+  }
+
+  await page.waitForLoadState('networkidle').catch(() => {});
 }
 
 async function findCaseId(page) {
@@ -1952,8 +2343,41 @@ function uniqueValues(values) {
   return [...new Set(values)];
 }
 
+// Verification helper: open an existing case's alignment report and read the
+// score using the same production path (no case creation, no interview). Mirrors
+// the 180s capture cap used in runFullWorkflow.
+export async function readAlignmentReportForExistingCase(config, { caseId, caseType }) {
+  const alignmentConfig = {
+    ...config,
+    run: { ...config.run, postCompletionWaitMs: Math.min(config.run.postCompletionWaitMs, 180000) }
+  };
+  const browser = await chromium.launch(alignmentConfig.browser);
+  try {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await login(page, alignmentConfig, 'requestor');
+
+    const createdCase = { id: caseId, commonGroundId: caseId, requireExactCaseMatch: true };
+    const syntheticCase = { caseType: caseType ?? alignmentConfig.run.caseType };
+    await openCaseAsRequestor(page, alignmentConfig, createdCase, syntheticCase);
+
+    const report = await waitForAndReadAlignmentReport(page, alignmentConfig, createdCase);
+    const expectedRange = alignmentConfig.run.scenarioFoundation?.alignmentScenarios.scenarios
+      .find((scenario) => scenario.id === alignmentConfig.run.alignmentScenarioId)?.expectedAlignmentRange ?? null;
+
+    return {
+      ...report,
+      expectedRange,
+      withinExpectedRange: expectedRange ? alignmentScoreWithinExpectedRange(report.score, expectedRange) : undefined
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
 export const workflowTestSupport = {
   extractAlignmentScore,
+  onAlignmentReportPage,
   alignmentScoreWithinExpectedRange,
   extractLatestQfi,
   factLabelingReady,

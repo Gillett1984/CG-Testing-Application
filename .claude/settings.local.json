@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd *)",
+      "Bash(node --check src/commonGroundAutomation.js)",
+      "Bash(grep -n \"postCompletionWaitMs, 180000\\\\|onAlignmentReportPage\\\\|function isValidAlignmentScore\\\\|console.warn\\(\\\\`\\\\[alignment\\\\]\" src/commonGroundAutomation.js)",
+      "Bash(node -e 'JSON.parse\\(require\\(\"fs\"\\).readFileSync\\(\"config/case-types/raise.json\"\\)\\); JSON.parse\\(require\\(\"fs\"\\).readFileSync\\(\"config/case-types/performance-review-coaching.json\"\\)\\); console.log\\(\"JSON OK\"\\)')",
+      "Bash(node --check scripts/readAlignmentReport.js)",
+      "Bash(node -e 'const c=require\\(\"./config/behaviors/catalog.json\"\\); const b=c.behaviors.find\\(x=>x.id===\"uncertainty_expression\"\\); console.log\\(JSON.stringify\\(b,null,2\\)\\)')",
+      "Bash(node --check src/llmResponder.js)",
+      "Bash(node -e 'const s=require\\(\"./config/selectors.example.json\"\\); console.log\\(JSON.stringify\\(s.requestor,null,2\\)\\)')",
+      "Bash(python3 -)",
+      "Bash(node -e ' *)",
+      "Bash(node scripts/readAlignmentReport.js --case-id CG-0316 --case-type \"Performance Review - Coaching\")",
+      "Bash(node --check public/app.js)",
+      "Bash(node -e *)",
+      "Bash(node --check src/scenarioController.js)",
+      "Bash(node .tmp/analyzeFails.mjs)",
+      "Bash(node --check src/scenarioSchemas.js)",
+      "Bash(node .tmp/analyzeBehaviors.mjs)"
+    ]
+  }
+}

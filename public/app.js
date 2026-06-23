@@ -48,6 +48,8 @@ const elements = {
   scenarioExpressions: document.querySelector('#scenarioExpressions'),
   softAssertions: document.querySelector('#softAssertions'),
   logs: document.querySelector('#logs'),
+  runHistory: document.querySelector('#runHistory'),
+  refreshHistory: document.querySelector('#refreshHistory'),
   runnerWorkspace: document.querySelector('#runnerWorkspace'),
   topicSetupWorkspace: document.querySelector('#topicSetupWorkspace'),
   showRunner: document.querySelector('#showRunner'),
@@ -68,6 +70,7 @@ const elements = {
 };
 
 let polling = null;
+let viewingHistory = false;
 let caseTypes = [];
 let qualityCriteria = null;
 let scenarioData = null;
@@ -93,12 +96,20 @@ elements.startRun.addEventListener('click', async () => {
     const payload = collectPayload();
     elements.startRun.disabled = true;
     await api('/api/run', { method: 'POST', body: JSON.stringify(payload) });
+    returnToLiveView();
     startPolling();
   } catch (error) {
     elements.startRun.disabled = false;
     alert(error.message);
   }
 });
+
+elements.runHistory.addEventListener('change', () => {
+  const id = elements.runHistory.value;
+  if (id) viewHistoricalRun(id);
+  else returnToLiveView();
+});
+elements.refreshHistory.addEventListener('click', loadRunHistory);
 
 elements.stopRun.addEventListener('click', async () => {
   await api('/api/stop', { method: 'POST', body: '{}' });
@@ -138,6 +149,7 @@ async function boot() {
   updateModeFields();
   await applyScenarioData(defaults.scenarioData, defaults.qualityCriteria, defaults.runConfig.alignmentScenarioId);
   await loadTopicDrafts();
+  await loadRunHistory();
   await updateStatus();
 }
 
@@ -433,6 +445,8 @@ function startPolling() {
 }
 
 async function updateStatus() {
+  // While viewing a saved run, do not let the live poller overwrite the panels.
+  if (viewingHistory) return;
   const run = await api('/api/run');
   const status = run.status ?? 'idle';
   elements.statusPill.textContent = status;
@@ -455,7 +469,66 @@ async function updateStatus() {
   if (!running && polling) {
     clearInterval(polling);
     polling = null;
+    loadRunHistory();
   }
+}
+
+async function loadRunHistory() {
+  let runs = [];
+  try {
+    runs = (await api('/api/runs')).runs ?? [];
+  } catch (error) {
+    console.warn('Failed to load run history:', error.message);
+    return;
+  }
+  const selected = elements.runHistory.value;
+  elements.runHistory.innerHTML = '<option value="">Live (current run)</option>';
+  for (const run of runs) {
+    const option = document.createElement('option');
+    option.value = run.id; // internal key stays the run-id/timestamp
+    const label = run.caseId || run.id; // show Case ID, fall back to timestamp
+    option.textContent = `${label}${run.status ? ` — ${run.status}` : ''}`;
+    elements.runHistory.append(option);
+  }
+  if (selected && runs.some((run) => run.id === selected)) elements.runHistory.value = selected;
+}
+
+async function viewHistoricalRun(id) {
+  if (polling) {
+    clearInterval(polling);
+    polling = null;
+  }
+  viewingHistory = true;
+  let detail;
+  try {
+    detail = await api(`/api/run-detail?id=${encodeURIComponent(id)}`);
+  } catch (error) {
+    viewingHistory = false;
+    alert(error.message);
+    return;
+  }
+  const status = detail.status ?? 'unknown';
+  elements.statusPill.textContent = status;
+  elements.statusPill.className = `pill ${status}`;
+  elements.artifactDir.textContent = detail.artifactDir ?? '-';
+  elements.logs.textContent = detail.report || '(No saved run-report.txt for this run.)';
+  elements.logs.scrollTop = 0;
+
+  const summaryCase = detail.summary?.cases?.[0];
+  const artifactCase = detail.artifactView?.cases?.[0];
+  elements.caseId.textContent = artifactCase?.caseId ?? summaryCase?.caseId ?? '-';
+  elements.runSummary.textContent = `Viewing saved run ${detail.id}${summaryCase ? ` — Case 1: ${summaryCase.status}` : ''}`;
+  renderArtifactView(artifactCase);
+
+  // Live controls stay inert while viewing history.
+  elements.stopRun.disabled = true;
+  elements.startRun.disabled = !scenarioData?.supported;
+}
+
+function returnToLiveView() {
+  viewingHistory = false;
+  elements.runHistory.value = '';
+  startPolling();
 }
 
 function renderArtifactView(artifact) {
@@ -522,6 +595,8 @@ function renderTimeline(executions) {
         <span class="actor-badge">${item.actor === 'requestor' ? 'Employee' : 'Manager'}</span>
         <span>Turn ${item.turn}</span>
         ${item.observedQfi == null ? '' : `<span>QFI ${item.observedQfi}</span>`}
+        ${item.observedIntent ? `<span>Intent ${escapeHtml(item.observedIntent)}</span>` : ''}
+        ${item.observedQor ? `<span>QoR ${escapeHtml(item.observedQor)}</span>` : ''}
       </div>
       <strong>${item.behaviorIds.map(behaviorName).join(' + ')}</strong>
       <p>${escapeHtml(questionLabel(item.primaryQuestionId))}</p>

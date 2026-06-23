@@ -184,6 +184,11 @@ tbody th { font-weight: 600; }
 .pill.running, .pill.stopping { background: #fff2c7; color: #704b00; }
 .pill.passed { background: #dff5e7; color: #17633a; }
 .pill.failed { background: #ffe3e3; color: #842424; }
+.run-history { display: flex; align-items: center; gap: 8px; margin: 8px 0 12px; }
+.run-history label { color: #4f5d6b; font-size: 12px; font-weight: 650; }
+.run-history select { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid #e0e5ea; border-radius: 6px; font-size: 12px; }
+.ghost-button { padding: 6px 10px; border: 1px solid #e0e5ea; border-radius: 6px; background: #fff; cursor: pointer; font-size: 12px; }
+.ghost-button:hover { background: #f3f6f9; }
 .status-grid { display: grid; grid-template-columns: 1.2fr .7fr 1fr .55fr .7fr; gap: 10px; }
 .status-grid > div { min-width: 0; padding: 10px; border: 1px solid #e0e5ea; border-radius: 6px; }
 .status-grid strong { display: block; margin-top: 5px; overflow-wrap: anywhere; font-size: 13px; }

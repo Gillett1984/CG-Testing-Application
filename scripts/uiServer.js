@@ -72,6 +72,14 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, await getRunStatus());
     }
 
+    if (request.method === 'GET' && url.pathname === '/api/runs') {
+      return sendJson(response, { runs: await listPastRuns() });
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/run-detail') {
+      return sendJson(response, await loadPastRunDetail(url.searchParams.get('id')));
+    }
+
     if (request.method === 'POST' && url.pathname === '/api/stop') {
       return sendJson(response, stopRun());
     }
@@ -332,6 +340,93 @@ async function getRunStatus() {
     payload.artifactView = await loadArtifactView(run.artifactDir);
   }
   return payload;
+}
+
+const RUN_ID_PATTERN = /^[0-9A-Za-z._-]+$/;
+
+async function listPastRuns() {
+  const resultsDir = path.join(rootDir, 'results');
+  if (!fsSync.existsSync(resultsDir)) return [];
+  const entries = await fs.readdir(resultsDir, { withFileTypes: true });
+  const runs = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !RUN_ID_PATTERN.test(entry.name)) continue;
+    const runDir = path.join(resultsDir, entry.name);
+    const summaryPath = path.join(runDir, 'summary.json');
+    const hasSummary = fsSync.existsSync(summaryPath);
+    if (!hasSummary && !fsSync.existsSync(path.join(runDir, 'run.json'))) continue;
+    let status = null;
+    let startedAt = null;
+    let finishedAt = null;
+    let caseId = null;
+    if (hasSummary) {
+      try {
+        const summary = await readJson(summaryPath);
+        status = summary.status ?? null;
+        startedAt = summary.startedAt ?? null;
+        finishedAt = summary.finishedAt ?? null;
+        caseId = summary.cases?.find((item) => item.caseId)?.caseId ?? null;
+      } catch {
+        // Ignore unreadable/partial summaries; still list the run.
+      }
+    }
+    if (!caseId) caseId = await readCaseIdFromRunJson(runDir);
+    runs.push({ id: entry.name, status, startedAt, finishedAt, caseId });
+  }
+  runs.sort((a, b) => b.id.localeCompare(a.id));
+  return runs.slice(0, 100);
+}
+
+// Fallback Common Ground case id from a run's run.json (root or first case dir),
+// used when summary.json has no caseId.
+async function readCaseIdFromRunJson(runDir) {
+  const candidates = [path.join(runDir, 'run.json')];
+  try {
+    const entries = await fs.readdir(runDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory() && /^case-\d+$/i.test(entry.name)) candidates.push(path.join(runDir, entry.name, 'run.json'));
+    }
+  } catch {
+    // ignore unreadable run dir
+  }
+  for (const candidate of candidates) {
+    if (!fsSync.existsSync(candidate)) continue;
+    try {
+      const artifact = await readJson(candidate);
+      const id = artifact.case?.commonGroundId ?? artifact.case?.id ?? null;
+      if (id) return id;
+    } catch {
+      // ignore unreadable run.json
+    }
+  }
+  return null;
+}
+
+async function loadPastRunDetail(rawId) {
+  const id = String(rawId ?? '');
+  if (!RUN_ID_PATTERN.test(id)) throw new Error('Invalid run id.');
+  const resultsDir = path.join(rootDir, 'results');
+  const runDir = path.resolve(resultsDir, id);
+  if (!runDir.startsWith(resultsDir) || !fsSync.existsSync(runDir) || !fsSync.statSync(runDir).isDirectory()) {
+    throw new Error(`Run not found: ${id}`);
+  }
+
+  const summaryPath = path.join(runDir, 'summary.json');
+  const reportPath = path.join(runDir, 'run-report.txt');
+  const summary = fsSync.existsSync(summaryPath) ? await readJson(summaryPath) : null;
+  const report = fsSync.existsSync(reportPath) ? await fs.readFile(reportPath, 'utf8') : '';
+
+  return {
+    id,
+    historical: true,
+    status: summary?.status ?? 'unknown',
+    startedAt: summary?.startedAt ?? null,
+    finishedAt: summary?.finishedAt ?? null,
+    artifactDir: runDir,
+    summary,
+    report,
+    artifactView: await loadArtifactView(runDir)
+  };
 }
 
 async function loadArtifactView(artifactDir) {

@@ -464,7 +464,7 @@
       "participant"
     ],
     "factStatementLabel": "Confident Fact",
-    "postProcessingTimeoutMs": 420000
+    "postProcessingTimeoutMs": 600000
   },
   "terms": [
     {

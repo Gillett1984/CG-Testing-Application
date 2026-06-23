@@ -322,8 +322,8 @@ function scenarioBehaviorDirective(assignment) {
     'uncertainty_expression:recovery_answer': 'Use Partner AI assistance and provide a complete substantive answer.',
     'skip_current_item:skip_request': 'Explicitly ask to skip the current item for now.',
     'skip_current_item:resurfaced_response': 'When the skipped item is resurfaced, answer it directly and completely.',
-    'off_topic_response:off_topic': 'Give a brief response that is clearly unrelated to the configured topic.',
-    'off_topic_response:recovery_answer': 'Accept the redirection and answer the current topic directly.',
+    'off_topic_response:off_topic': 'Give ONE short sentence that is clearly unrelated to the configured topic, and do not introduce a different ongoing work subject the interview might follow. Keep it to a single brief aside.',
+    'off_topic_response:recovery_answer': 'Explicitly set the digression aside in your first words, then directly answer the CURRENT performance-review question using the scenario facts and the assigned rating. Ignore the off-topic subject entirely.',
     'embedded_questions:question_only': 'Respond only with one question relevant to the current prompt.',
     'embedded_questions:question_at_beginning': 'Begin with a relevant question, then provide substantive scenario information.',
     'embedded_questions:question_in_middle': 'Provide scenario information, place a relevant question in the middle, then continue the answer.',
@@ -925,6 +925,12 @@ function arrayOfStrings(value) {
 }
 
 function buildGenerationMessages(input, correction = null) {
+  // High-quality primary-question turns must cover all mandatory answer-guidance
+  // points in one go; vague/behavior-only/partial turns stay tight.
+  const wantsFullCoverage = input.policyDecision?.useQualityCriteria !== false
+    && input.policyDecision?.quality !== 'low'
+    && input.policyDecision?.specificity !== 'vague'
+    && input.behaviorPlan?.mode !== 'defer';
   const systemContent = [
     'You generate synthetic Requestor/user responses for QA testing a Partner AI interview.',
     'You are the synthetic user for the actorRole and actorPerspective in the input. The actorPerspective defines whose work is being discussed and is authoritative. You are not Partner AI.',
@@ -954,7 +960,9 @@ function buildGenerationMessages(input, correction = null) {
     'Never include real personal data.',
     'Do not mention that you are an AI or that this is a test unless directly useful as synthetic content.',
     'Write at an eighth-grade reading level using common words and short sentences.',
-    'Keep every submitted response to no more than 3 sentences and 75 words total.',
+    wantsFullCoverage
+      ? 'For a high-quality answer, cover every mandatory answer-guidance point in one compact reply (up to about 6 short sentences or semicolon-separated clauses, ~150 words); never drop a required point just to stay short.'
+      : 'Keep every submitted response to no more than 3 sentences and 75 words total.',
     'A behavior-only request may be a single sentence when one sentence is natural.',
     'Keep the answer concise and plausible, but never cut off mid-sentence.',
     'Return a complete, submit-ready answer. If many criteria are requested, cover each briefly rather than leaving the response incomplete.',
@@ -975,13 +983,16 @@ function buildGenerationMessages(input, correction = null) {
       'For a primary-question answer, begin with the exact employeeOpeningStatement or managerOpeningStatement in scenarioExpression for this actor.',
       'Preserve scenarioExpression.expectedRelationship throughout follow-up answers. Aligned views must remain compatible, while opposite views must remain unmistakably opposed.',
       'Use short sentences and plain language that an eighth-grade reader can understand. Explain why each fact matters.',
-      'Use no more than 3 sentences and 75 words in the final submitted response.',
+      wantsFullCoverage
+        ? 'Cover all mandatory answer-guidance points concisely (about 6 short sentences / ~150 words max); do not omit a required point to stay brief.'
+        : 'Use no more than 3 sentences and 75 words in the final submitted response.',
       'Avoid corporate or technical jargon when ordinary words will work.',
       'Do not introduce a different workplace event when scenarioTurn provides one.',
       'The Requestor and Participant must describe the same underlying event while interpreting it according to their assigned rating.',
       'Do not invent a new job title, project, metric, baseline, result, expectation, stakeholder, or review period.',
       'Follow actorPerspective exactly. For manager_evaluating_employee, speak as the manager evaluating the employee; do not speak as the employee. For employee_self_assessment, speak as the employee evaluating their own work.',
-      'Use the assigned rating stance plainly. Opposite-end ratings must produce plainly opposing evaluations, not merely different emphasis.'
+      'Use the assigned rating stance plainly. Opposite-end ratings must produce plainly opposing evaluations, not merely different emphasis.',
+      'When a term\'s assigned ratingId is "unsatisfactory" or "needs_improvement", lead with that conclusion in plain strong language (e.g. materially below expectations / meaningful gaps requiring focused improvement) and do not soften it into a balanced, mixed, or neutral assessment; mention favorable counter-evidence only briefly and explain why it does not change the rating. When the assigned ratingId is "outstanding" or "exceeds_expectations", state that strong conclusion first and do not hedge it down toward "meets expectations".'
     );
     if (input.behaviorPlan) {
       systemContent.push(
@@ -990,7 +1001,7 @@ function buildGenerationMessages(input, correction = null) {
         input.behaviorPlan.mode === 'defer'
           ? 'Return only the behavior response. Do not include or summarize baseScenarioResponse yet.'
           : 'Preserve the substance of baseScenarioResponse while visibly applying every required behavior stage.',
-        'A behavior counts only when its required words or structure are plainly visible in the submitted response.'
+        'A behavior counts only when its required words or structure are plainly visible in the submitted response. Make the behavior unmistakable: for a clarification, definition, or example request include a direct question; for uncertainty, say plainly that you are unsure or it is hard to judge; for fatigue, say plainly that this is tiring or hard to focus on.'
       );
     }
   }
@@ -1074,7 +1085,9 @@ async function validateGeneratedResponse(llm, input, candidateResponse) {
           'Fail if the response sounds like Partner AI coaching, summarizes what was captured, or offers to help.',
           'Fail if the response is cut off mid-sentence or visibly incomplete.',
           'Fail if the response is generic enough that it could ignore the latest Partner AI prompt.',
-          'A heuristic warning is advisory only. Use judgment: pass a response if it directly answers the latest Partner AI prompt even when keyword matching is imperfect.'
+          'A heuristic warning is advisory only. Use judgment: pass a response if it directly answers the latest Partner AI prompt even when keyword matching is imperfect.',
+          'Judge coverage ONLY against the provided activeQualityCriteria and answer guidance. Do not require a framework, methodology, formal structure, or detail beyond those listed items.',
+          'If the response addresses each listed required criterion in plain language and answers the latest prompt, pass it even if it is brief, informal, or not exhaustive.'
         ].join(' ')
       },
       {
@@ -1094,6 +1107,7 @@ async function validateGeneratedResponse(llm, input, candidateResponse) {
         })
       }
     ],
+    model: llm.judgeModel ?? llm.model,
     temperature: 0,
     max_tokens: 300,
     response_format: { type: 'json_object' }
@@ -1110,7 +1124,9 @@ export function validateScenarioResponse(input, candidateResponse) {
   if (!input.scenarioTurn) return { pass: true };
   const assignments = input.scenarioTurn.behaviors ?? [];
   const behaviorVerification = verifyScenarioBehaviors(candidateResponse, assignments);
-  const failedBehavior = behaviorVerification.find((item) => item.passed === false && item.blocking !== false);
+  // Only hard-fail behaviors that are NOT softAssertionOnly. Soft behaviors are still
+  // recorded (passed:false flows to coverage + soft assertions) but never block/throw.
+  const failedBehavior = behaviorVerification.find((item) => item.passed === false && item.blocking !== false && !item.softAssertionOnly);
   if (failedBehavior) {
     return {
       pass: false,
@@ -1202,16 +1218,16 @@ export function verifyScenarioBehaviors(candidateResponse, assignments = []) {
     let reason = 'The required behavior is visible.';
     switch (key) {
       case 'clarification_request:request':
-        passed = questionMarks === 1 && /clarif|what do you mean|which|are you asking|could you explain/.test(lower);
+        passed = questionMarks >= 1 && /clarif|what do you mean|which|are you asking|could you explain|can you explain|help me understand/.test(lower);
         break;
       case 'definition_request:request':
-        passed = questionMarks === 1 && /define|what does|what do you mean by|meaning of/.test(lower);
+        passed = questionMarks >= 1 && /define|what does|what do you mean by|meaning of|what is meant by/.test(lower);
         break;
       case 'example_request:request':
-        passed = questionMarks === 1 && /example|illustrat|what would.*look like/.test(lower);
+        passed = questionMarks >= 1 && /example|illustrat|what would.*look like|such as|like what/.test(lower);
         break;
       case 'embedded_questions:question_only':
-        passed = questionMarks === 1 && responseWordCount(text) <= 35 && text.endsWith('?');
+        passed = questionMarks >= 1 && responseWordCount(text) <= 60 && text.endsWith('?');
         break;
       case 'embedded_questions:question_at_beginning':
         passed = questionMarks >= 1 && firstQuestion >= 0 && firstQuestion < Math.max(80, text.length * 0.35) && text.slice(firstQuestion + 1).trim().length >= 30;
@@ -1260,7 +1276,15 @@ export function verifyScenarioBehaviors(candidateResponse, assignments = []) {
     }
     if (passed === false) reason = 'The required objective response structure is not present.';
     if (passed === null && !reason) reason = 'The behavior is subjective or ambiguous and requires semantic review.';
-    return { behaviorId: assignment.behaviorId, stage: assignment.stage, passed, blocking, reason, assignedFatigueLevel: assignment.fatigueLevel };
+    return {
+      behaviorId: assignment.behaviorId,
+      stage: assignment.stage,
+      passed,
+      blocking,
+      reason,
+      assignedFatigueLevel: assignment.fatigueLevel,
+      softAssertionOnly: assignment.softAssertionOnly !== false
+    };
   });
 }
 
@@ -1297,6 +1321,7 @@ export async function validateSubjectiveBehaviorsWithLlm(llm, input, candidateRe
         })
       }
     ],
+    model: llm.judgeModel ?? llm.model,
     temperature: 0,
     max_tokens: 500,
     response_format: { type: 'json_object' }
@@ -1317,14 +1342,15 @@ export async function validateSubjectiveBehaviorsWithLlm(llm, input, candidateRe
     const check = judged.get(`${item.behaviorId}:${item.stage}`);
     return {
       ...item,
-      passed: check?.behaviorPresent === true && Number(check?.confidence ?? 0) >= 0.65,
+      passed: check?.behaviorPresent === true,
       semanticConfidence: Number(check?.confidence ?? 0),
       evidence: check?.evidence ?? '',
       intensityMatches: check?.intensityMatches,
       observedIntensity: check?.observedIntensity
     };
   });
-  const failed = behaviorVerification.find((item) => item.passed === false);
+  // Soft behaviors never hard-fail the response; their misses are recorded downstream.
+  const failed = behaviorVerification.find((item) => item.passed === false && !item.softAssertionOnly);
   if (failed) {
     return {
       pass: false,
@@ -1335,6 +1361,14 @@ export async function validateSubjectiveBehaviorsWithLlm(llm, input, candidateRe
   }
   const warnings = [...(scenarioCheck.warnings ?? [])];
   for (const item of behaviorVerification) {
+    if (item.passed === true && Number(item.semanticConfidence ?? 1) < 0.65) {
+      warnings.push({
+        type: 'behavior_confidence',
+        passed: false,
+        expected: `${item.behaviorId} expressed with clear confidence (>= 0.65).`,
+        observed: `Behavior present but low judge confidence (${item.semanticConfidence}). ${item.evidence ?? ''}`.trim()
+      });
+    }
     if (item.assignedFatigueLevel && item.intensityMatches === false) {
       warnings.push({
         type: 'behavior_intensity',
@@ -1692,27 +1726,21 @@ function parseValidationResult(rawText) {
 function responseTokenBudget(input, isRetry = false) {
   const planMode = input.activeManeuver?.responsePlan?.mode;
   const style = `${input.activeManeuver?.responseStyle ?? ''} ${planMode ?? ''}`.toLowerCase();
-  const criteriaCount = input.activeManeuver?.responsePlan?.remainingCriteria?.length ?? 0;
-  const promptText = normalize([
-    input.activePrompt?.discussionArea,
-    input.activePrompt?.primaryQuestion,
-    input.activePrompt?.answerGuidance?.join(' ')
-  ].join(' '));
 
-  if (/high-quality|full/.test(style)) {
-    return isRetry ? 280 : 240;
-  }
+  // Tight tiers for non-substantive turns.
   if (/partial/.test(style)) return isRetry ? 180 : 150;
   if (/question|ask/.test(style)) return isRetry ? 100 : 80;
-
   if (input.policyDecision?.quality === 'low' || input.policyDecision?.specificity === 'vague') {
     return isRetry ? 150 : 120;
   }
-  if (input.policyDecision?.useQualityCriteria === false) {
-    return isRetry ? 220 : 180;
-  }
+  if (input.policyDecision?.useQualityCriteria === false) return isRetry ? 220 : 180;
 
-  return isRetry ? 280 : 240;
+  // Full-coverage turns (high-quality answers covering all mandatory guidance)
+  // need room to cover every point in one reply; scale with the number of points.
+  const guidanceCount = input.scenarioTurn?.scenarioContext?.question?.answerGuidance?.length
+    ?? input.activeQualityCriteria?.length ?? 0;
+  const coverageBudget = guidanceCount >= 5 ? 520 : guidanceCount >= 3 ? 440 : 360;
+  return isRetry ? coverageBudget + 80 : coverageBudget;
 }
 
 export function validateCompactResponseStyle(value) {

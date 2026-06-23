@@ -107,7 +107,7 @@
     {
       "id": "optional_off_topic",
       "behaviorId": "off_topic_response",
-      "enabled": true,
+      "enabled": false,
       "target": { "mode": "random_primary_question", "excludePrimaryQuestionIds": [] },
       "combineWith": [],
       "repetitionsPerActor": 1

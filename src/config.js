@@ -119,7 +119,11 @@ export function loadConfig(args) {
     },
     llm: {
       apiKey: process.env.OPENAI_API_KEY,
-      model: process.env.OPENAI_MODEL ?? 'gpt-4.1-mini'
+      model: process.env.OPENAI_MODEL ?? 'gpt-4.1-mini',
+      // Pass/fail gatekeeper judges run on a faster model to cut per-turn latency.
+      // Response GENERATION stays on `model`, so synthetic response content is
+      // unchanged. Set OPENAI_JUDGE_MODEL equal to OPENAI_MODEL to disable this.
+      judgeModel: process.env.OPENAI_JUDGE_MODEL ?? 'gpt-4.1-nano'
     }
   };
 }

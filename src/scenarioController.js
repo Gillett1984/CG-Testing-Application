@@ -149,18 +149,31 @@ export class ScenarioController {
     if (criterionId && !criterion) throw new Error(`Unknown criterion ${criterionId} for ${primaryQuestionId}`);
 
     const termIds = criterion?.termIds ?? [question.primaryTermId];
+    const termIdSet = new Set(termIds);
     const actorDossier = actor === 'requestor' ? this.dossiers?.employee : this.dossiers?.manager;
     const scenarioExpression = this.dossiers?.scenarioExpressionPlan?.questionExpressions
       ?.find((item) => item.primaryQuestionId === primaryQuestionId);
+    // Scope the neutral evidence packet to this question's term(s) so each turn's
+    // prompt stays small. The current question's term evidence and its own
+    // evidence mapping are kept; only off-question terms/questions are dropped
+    // (the per-turn `terms` array below is already scoped to the same term ids).
+    const fullPacket = this.dossiers?.evidencePacket ?? null;
+    const neutralEvidence = fullPacket
+      ? {
+          ...fullPacket,
+          termEvidence: (fullPacket.termEvidence ?? []).filter((item) => termIdSet.has(item.termId)),
+          primaryQuestionEvidence: (fullPacket.primaryQuestionEvidence ?? []).filter((item) => item.primaryQuestionId === primaryQuestionId)
+        }
+      : null;
     return {
       actor,
       question: structuredClone(question),
       criterion: criterion ? structuredClone(criterion) : null,
       canonicalProfile: actorDossier?.canonicalProfile ? structuredClone(actorDossier.canonicalProfile) : null,
-      neutralEvidence: structuredClone(this.dossiers?.evidencePacket ?? null),
+      neutralEvidence: structuredClone(neutralEvidence),
       executiveSummary: actorDossier?.executiveSummary ?? '',
       dossierAnswer: actorDossier?.primaryQuestionAnswers?.find((item) => item.primaryQuestionId === primaryQuestionId)?.answer ?? '',
-      dossierTermPositions: structuredClone(actorDossier?.termPositions ?? []),
+      dossierTermPositions: structuredClone((actorDossier?.termPositions ?? []).filter((item) => termIdSet.has(item.termId))),
       scenarioExpression: structuredClone(scenarioExpression ?? null),
       terms: termIds.map((termId) => {
         const term = this.topic.terms.find((item) => item.id === termId);
@@ -176,10 +189,12 @@ export class ScenarioController {
   }
 
   getPendingBehaviors({ actor, primaryQuestionId, criterionId = undefined }) {
+    // B: criterion-bound stages become eligible on ANY turn of their primary
+    // question. Common Ground asks at the primary-question level, so requiring the
+    // exact criterion match kept criterion-bound behaviors from ever firing.
     return this.plan.behaviors
       .filter((assignment) => assignment.actor === actor)
       .filter((assignment) => assignment.primaryQuestionId === primaryQuestionId)
-      .filter((assignment) => !assignment.criterionId || assignment.criterionId === criterionId)
       .filter((assignment) => this.behaviorProgress.get(behaviorAssignmentKey(assignment))?.status === 'pending')
       .filter((assignment) => this.isNextBehaviorStage(assignment))
       .sort((left, right) => left.sequence - right.sequence)
@@ -318,7 +333,11 @@ export class ScenarioController {
       const behaviorIds = [...new Set(assignments.map((item) => item.behaviorId))];
       const completedBehaviorIds = behaviorIds.filter((behaviorId) => {
         const behaviorAssignments = assignments.filter((item) => item.behaviorId === behaviorId);
-        return behaviorAssignments.every((item) => this.behaviorProgress.get(behaviorAssignmentKey(item))?.status === 'completed');
+        // A: count a behavior as covered when its key (lowest-sequence) stage has
+        // fired — partial credit. Later stages often depend on Common Ground
+        // resurfacing/following up, so requiring every stage scored real firings as 0.
+        const primaryStage = behaviorAssignments.reduce((earliest, item) => (item.sequence < earliest.sequence ? item : earliest));
+        return this.behaviorProgress.get(behaviorAssignmentKey(primaryStage))?.status === 'completed';
       });
       byActor[actor] = {
         assignedBehaviors: behaviorIds.length,
