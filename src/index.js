@@ -22,6 +22,7 @@ async function main() {
   }
   if (config.run.existingCaseId) console.log(`Existing case ID: ${config.run.existingCaseId}`);
   if (config.run.runMode === 'fact_labeling_smoke') console.log(`Fact labeling stage: ${config.run.factRatingStage}`);
+  if (config.run.scriptedAnswersPath) console.log(`Scripted answers: ${config.run.scriptedAnswersPath} (behaviors disabled)`);
 
   const summary = {
     runId: store.runId,
@@ -34,6 +35,7 @@ async function main() {
     numberOfCases: config.run.numberOfCases,
     stopOnFailure: config.run.stopOnFailure,
     qualityCriteriaPath: config.run.qualityCriteriaPath,
+    scriptedAnswersPath: config.run.scriptedAnswersPath ?? null,
     cases: []
   };
 
@@ -56,6 +58,7 @@ async function main() {
         participantGettingStartedCompleted: result.participantGettingStarted?.completed,
         syntheticUserScenarioCompliant: result.syntheticUserScenarioCompliant,
         behaviorCoverage: result.behaviorCoverage,
+        scriptedAnswerCoverage: summarizeScriptedAnswers(result),
         softAssertionFailures: result.softAssertions?.filter((item) => !item.passed).length ?? 0,
         alignmentScore: result.alignmentReport?.score,
         alignmentWithinExpectedRange: result.alignmentReport?.withinExpectedRange,
@@ -130,6 +133,7 @@ function buildRunReport(config, summary) {
     `Quality Criteria Path: ${config.run.qualityCriteriaPath ?? ''}`,
     `Alignment Scenario: ${config.run.alignmentScenarioId ?? ''}`,
     `Behavior Schedule: ${config.run.behaviorSchedule?.name ?? ''}`,
+    `Scripted Answers: ${config.run.scriptedAnswersPath ?? 'none (LLM responder)'}`,
     `Post-Processing Timeout Per Stage: ${Math.round(config.run.postCompletionWaitMs / 60000)} minutes`,
     '',
     'Case Results',
@@ -147,6 +151,9 @@ function buildRunReport(config, summary) {
       `  Requestor Getting Started: ${item.requestorGettingStartedCompleted ?? false}`,
       `  Participant Getting Started: ${item.participantGettingStartedCompleted ?? false}`,
       `  Synthetic User Scenario Compliant: ${item.syntheticUserScenarioCompliant ?? false}`,
+      `  Scripted Answers Used: ${item.scriptedAnswerCoverage
+        ? `${item.scriptedAnswerCoverage.scriptedTurns} turns (${item.scriptedAnswerCoverage.sequentialFallbacks} sequential fallback), ${item.scriptedAnswerCoverage.llmTurns} LLM follow-ups`
+        : 'n/a'}`,
       `  Soft Assertion Failures: ${item.softAssertionFailures ?? 0}`,
       `  Alignment Score: ${item.alignmentScore ?? 'not detected'}`,
       `  Alignment In Expected Range (record only): ${item.alignmentWithinExpectedRange ?? 'not evaluated'}`,
@@ -163,6 +170,21 @@ function buildRunReport(config, summary) {
   }
 
   return `${lines.join('\n')}\n`;
+}
+
+// Rolls up scripted-answer usage from a case's transcripts. Returns null when
+// scripted-answers mode was not used (no scripted turns recorded).
+function summarizeScriptedAnswers(result) {
+  const transcripts = result?.transcripts ?? {};
+  const entries = Object.values(transcripts).flat().filter((entry) => entry && entry.role === 'syntheticUser');
+  const scripted = entries.filter((entry) => entry.responseSource === 'scripted');
+  if (!scripted.length) return null;
+  return {
+    scriptedTurns: scripted.length,
+    llmTurns: entries.filter((entry) => entry.responseSource === 'llm').length,
+    sequentialFallbacks: scripted.filter((entry) => entry.scriptedAnswer?.matchConfidence === 'sequential-fallback').length,
+    questionsAnswered: [...new Set(scripted.map((entry) => entry.scriptedAnswer?.primaryQuestionId).filter(Boolean))]
+  };
 }
 
 function formatRunMode(runMode) {

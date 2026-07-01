@@ -4,6 +4,8 @@ import { generatePartnerAiResponse, generateScenarioDossiers, verifyOpenAiConnec
 import { extractPromptContext } from './promptContext.js';
 import { evaluateManeuverSuccess, evaluatePolicyAdvanceStop, findActiveManeuver } from './testManeuvers.js';
 import { createScenarioController } from './scenarioController.js';
+import { matchScenarioQuestion, matchScenarioQuestionScored, matchScenarioCriterion, textSimilarity } from './questionMatching.js';
+import { pickScriptedAnswer } from './scriptedAnswers.js';
 
 export async function runAutomation(config, store) {
   if (config.run.runMode !== 'fact_labeling_smoke') await verifyOpenAiConnectivity(config.llm);
@@ -62,7 +64,8 @@ export async function runAutomation(config, store) {
       await startGettingStarted(participantInterviewPage, config, artifacts.case);
       const participantResult = await runPartnerAiInterview(participantInterviewPage, config, participantTranscript, {
         seed: `${artifacts.case.commonGroundId ?? store.runId}:participant`,
-        actorRole: 'participant'
+        actorRole: 'participant',
+        scriptedAnswers: config.run.scriptedAnswers
       });
       artifacts.participantGettingStarted = participantResult;
       artifacts.completedGettingStarted = participantResult.completed;
@@ -104,7 +107,8 @@ export async function runAutomation(config, store) {
 
     const requestorResult = await runPartnerAiInterview(interviewPage, config, requestorTranscript, {
       seed: artifacts.case?.commonGroundId ?? artifacts.case?.syntheticReference ?? store.runId,
-      actorRole: 'requestor'
+      actorRole: 'requestor',
+      scriptedAnswers: config.run.scriptedAnswers
     });
     updateArtifactCaseId(artifacts, findCaseIdInText(JSON.stringify(requestorTranscript)));
     artifacts.requestorGettingStarted = requestorResult;
@@ -345,6 +349,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     seed: `${artifacts.case?.commonGroundId ?? store.runId}:participant`,
     actorRole: 'participant',
     scenarioController,
+    scriptedAnswers: config.run.scriptedAnswers,
     artifacts
   });
   artifacts.participantGettingStarted = participantResult;
@@ -392,6 +397,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     seed: `${artifacts.case?.commonGroundId ?? store.runId}:requestor`,
     actorRole: 'requestor',
     scenarioController,
+    scriptedAnswers: config.run.scriptedAnswers,
     artifacts
   });
   artifacts.requestorGettingStarted = requestorResult;
@@ -631,7 +637,7 @@ async function startGettingStarted(page, config, createdCase) {
     return;
   }
   for (const role of ['link', 'button']) {
-    const control = page.getByRole(role, { name: /^Getting Started$/i }).first();
+    const control = page.getByRole(role, { name: /^(Getting Started|Begin Discussion)$/i }).first();
     const visible = await control.isVisible({ timeout: 500 }).catch(() => false);
     const enabled = visible && await control.isEnabled({ timeout: 500 }).catch(() => false);
     if (enabled) {
@@ -645,13 +651,19 @@ async function startGettingStarted(page, config, createdCase) {
     await page.goto(new URL('/dashboard', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' });
     await page.waitForLoadState('networkidle').catch(() => {});
   }
-  await clickCaseCardButton(page, createdCase, /Getting Started/i);
+  await clickCaseCardButton(page, createdCase, /Getting Started|Begin Discussion/i);
   await page.waitForLoadState('networkidle').catch(() => {});
   await page.waitForTimeout(2000);
 }
 
 async function runPartnerAiInterview(page, config, transcript, options = {}) {
   await waitForInterviewReady(page, config);
+
+  // Scripted-answers mode: which primary questions this actor has already
+  // answered from the supplied script (so only the FIRST turn of each primary
+  // question uses the scripted answer; follow-ups fall back to the responder).
+  const scriptedAnswers = options.scriptedAnswers ?? null;
+  const answeredScriptedQuestions = new Set();
 
   for (let turn = 1; turn <= config.run.maxTurns; turn += 1) {
     const latestPrompt = await readLatestPrompt(page, config);
@@ -683,11 +695,27 @@ async function runPartnerAiInterview(page, config, transcript, options = {}) {
     const scenarioTurn = options.scenarioController
       ? buildScenarioTurn(options.scenarioController, options.actorRole, latestPrompt)
       : null;
-    const activeManeuver = scenarioTurn ? null : findActiveManeuver({
+    // Scripted-answers runs are "clean": no behaviors and no maneuvers are
+    // injected. The scenario dossier describes a randomly generated persona that
+    // conflicts with the scripted answers' persona, so scripted follow-up turns
+    // must NOT use it (that caused the interviewee's role to drift, e.g. from
+    // "Controller" to the dossier's role). We still build scenarioTurn for
+    // scripted-question matching, but the LLM follow-up responder is grounded in
+    // the transcript (which already contains the scripted answers) instead.
+    if (scriptedAnswers && scenarioTurn) scenarioTurn.behaviors = [];
+    const activeManeuver = (scenarioTurn || scriptedAnswers) ? null : findActiveManeuver({
       latestPrompt,
       run: config.run,
       seed: options.seed
     });
+
+    // Decide whether this turn is answered from the script. We use the first
+    // response to each primary question; the manager/employee answer is chosen
+    // by actor. Matching reuses the same fuzzy matcher as scenario turns, with a
+    // sequential fallback when the live prompt can't be matched confidently.
+    const scriptedSelection = scriptedAnswers
+      ? selectScriptedAnswer({ config, scriptedAnswers, scenarioTurn, latestPrompt, actorRole: options.actorRole, answeredScriptedQuestions })
+      : null;
 
     const responseContext = {
       actorRole: options.actorRole ?? 'requestor',
@@ -695,13 +723,21 @@ async function runPartnerAiInterview(page, config, transcript, options = {}) {
       testBehaviorPolicy: config.run.testBehaviorPolicy,
       qualityCriteria: config.run.qualityCriteria,
       activeManeuver,
-      scenarioTurn,
+      // In scripted mode, follow-ups must stay consistent with the scripted
+      // persona (grounded in the transcript), not the dossier persona.
+      scenarioTurn: scriptedAnswers ? null : scenarioTurn,
+      // Scripted mode uses the live-app role assignment (participant = employee in
+      // first person, requestor = manager in third person).
+      scriptedMode: Boolean(scriptedAnswers),
       latestPrompt,
       transcript,
       turn,
       llm: config.llm
     };
-    const response = await generatePartnerAiResponse(responseContext);
+    const responseSource = scriptedSelection ? 'scripted' : 'llm';
+    const response = scriptedSelection
+      ? scriptedSelection.text
+      : await generatePartnerAiResponse(responseContext);
     const responseValidationWarnings = responseContext.responseValidationWarnings ?? [];
     const behaviorVerification = responseContext.behaviorVerification ?? [];
     transcript.push({
@@ -720,6 +756,14 @@ async function runPartnerAiInterview(page, config, transcript, options = {}) {
       behaviorVerification,
       scenarioContext: scenarioTurn?.scenarioContext ?? null,
       validationWarnings: responseValidationWarnings,
+      responseSource,
+      scriptedAnswer: scriptedSelection
+        ? {
+            primaryQuestionId: scriptedSelection.primaryQuestionId,
+            matchConfidence: scriptedSelection.matchConfidence,
+            matchScore: scriptedSelection.matchScore
+          }
+        : null,
       at: new Date().toISOString()
     });
     options.artifacts?.softAssertions.push(...responseValidationWarnings.map((warning) => ({
@@ -727,7 +771,7 @@ async function runPartnerAiInterview(page, config, transcript, options = {}) {
       observed: `${options.actorRole ?? 'requestor'} turn ${turn}: ${warning.observed}`
     })));
 
-    if (options.scenarioController && scenarioTurn?.primaryQuestionId) {
+    if (!scriptedAnswers && options.scenarioController && scenarioTurn?.primaryQuestionId) {
       retainPlannedSourceFacts(options.scenarioController, options.actorRole, scenarioTurn.primaryQuestionId, response);
     }
 
@@ -901,33 +945,44 @@ function buildScenarioTurn(controller, actor, latestPrompt) {
   };
 }
 
-function matchScenarioQuestion(topic, promptContext) {
-  const candidates = [promptContext.primaryQuestion, promptContext.activeQuestion, promptContext.discussionArea].filter(Boolean);
-  let best = null;
-  let bestScore = 0;
-  for (const question of topic.primaryQuestions) {
-    const values = [question.question, question.discussionArea];
-    const score = Math.max(...candidates.flatMap((candidate) => values.map((value) => textSimilarity(candidate, value))));
-    if (score > bestScore) {
-      best = question;
-      bestScore = score;
-    }
-  }
-  return bestScore >= 0.34 ? best : null;
-}
+// Resolves the scripted answer (if any) for the current turn. Returns null when
+// the turn should be answered by the normal responder (follow-up, unmatched
+// prompt with no fallback left, or no scripted answer for this actor/question).
+function selectScriptedAnswer({ config, scriptedAnswers, scenarioTurn, latestPrompt, actorRole, answeredScriptedQuestions }) {
+  const topic = config.run.scenarioFoundation?.topic;
+  let primaryQuestionId = scenarioTurn?.primaryQuestionId ?? null;
+  let matchConfidence = primaryQuestionId ? 'fuzzy' : null;
+  let matchScore = null;
 
-function matchScenarioCriterion(question, activeQuestion) {
-  if (!activeQuestion) return null;
-  let best = null;
-  let bestScore = 0;
-  for (const criterion of question.highQualityCriteria) {
-    const score = textSimilarity(activeQuestion, criterion.requirement);
-    if (score > bestScore) {
-      best = criterion;
-      bestScore = score;
+  if (topic) {
+    // Re-score against the topic so we capture a confidence number; this agrees
+    // with scenarioTurn.primaryQuestionId when both are present.
+    const scored = matchScenarioQuestionScored(topic, extractPromptContext(latestPrompt));
+    if (scored.question) {
+      primaryQuestionId = scored.question.id;
+      matchConfidence = 'fuzzy';
+      matchScore = scored.score;
     }
   }
-  return bestScore >= 0.28 ? best : null;
+
+  // Sequential fallback: if the live prompt can't be matched confidently, assign
+  // the next unanswered scripted question in file order (manager prompts mirror
+  // the employee questions, so the ordering is preserved across actors).
+  if (!primaryQuestionId) {
+    const next = scriptedAnswers.answers.find((entry) => !answeredScriptedQuestions.has(entry.primaryQuestionId));
+    if (next) {
+      primaryQuestionId = next.primaryQuestionId;
+      matchConfidence = 'sequential-fallback';
+    }
+  }
+
+  if (!primaryQuestionId || answeredScriptedQuestions.has(primaryQuestionId)) return null;
+
+  const text = pickScriptedAnswer(scriptedAnswers, primaryQuestionId, actorRole ?? 'requestor');
+  if (!text) return null;
+
+  answeredScriptedQuestions.add(primaryQuestionId);
+  return { text, primaryQuestionId, matchConfidence, matchScore };
 }
 
 function selectCompatibleTurnBehaviors(pending, catalog) {
@@ -1025,20 +1080,6 @@ function extractLatestQor(text) {
   const score = last[2] ?? '';
   if (!level && !score) return null;
   return score ? `${level} (${score})`.trim() : level;
-}
-
-function textSimilarity(left, right) {
-  const leftTokens = new Set(significantTextTokens(left));
-  const rightTokens = new Set(significantTextTokens(right));
-  if (!leftTokens.size || !rightTokens.size) return 0;
-  const matches = [...leftTokens].filter((token) => rightTokens.has(token)).length;
-  return matches / Math.min(leftTokens.size, rightTokens.size);
-}
-
-function significantTextTokens(value) {
-  const stop = new Set(['what', 'when', 'where', 'which', 'would', 'could', 'should', 'your', 'their', 'with', 'that', 'this', 'from', 'have', 'been', 'into', 'about', 'please', 'cover']);
-  return String(value ?? '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
-    .filter((token) => token.length > 3 && !stop.has(token));
 }
 
 async function waitForPostProcessing(page, config) {
@@ -1245,7 +1286,7 @@ function extractFactLabelCount(text) {
 }
 
 function gettingStartedAvailable(text) {
-  return /getting started/i.test(text) && !/post-processing|post processing|still processing/i.test(text);
+  return /getting started|begin discussion/i.test(text) && !/post-processing|post processing|still processing/i.test(text);
 }
 
 // Click the "Rate [party]'s Facts" / "Next Up: Rate ... Facts" control. DOM-based
@@ -1255,9 +1296,13 @@ async function clickRateFactsControl(page, options) {
   return page.evaluate(({ ratedParty }) => {
     const norm = (value) => String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
     const isDisabled = (element) => element.disabled || element.getAttribute('aria-disabled') === 'true';
-    const partyToken = ratedParty === 'participant' ? 'participant' : 'request[eo]r';
-    const partyRe = new RegExp(`rate\\b[\\s\\S]*\\b${partyToken}'?s?\\b[\\s\\S]*\\bfacts?\\b`, 'i');
-    const anyRe = /rate\b[\s\S]*\bfacts?\b/i;
+    // Live UI wording varies: "Rate Participant's Facts" (old) vs "Rate Employee's
+    // Statements" / "Rate Manager's Statements" (current). The requestor is the
+    // manager and the participant is the employee, so match either vocabulary, and
+    // accept both "facts" and "statements".
+    const partyToken = ratedParty === 'participant' ? '(?:participant|employee)' : '(?:request[eo]r|manager)';
+    const partyRe = new RegExp(`rate\\b[\\s\\S]*\\b${partyToken}'?s?\\b[\\s\\S]*\\b(?:facts?|statements?)\\b`, 'i');
+    const anyRe = /rate\b[\s\S]*\b(?:facts?|statements?)\b/i;
     const controls = [...document.querySelectorAll('a,button,[role="button"]')].filter((element) => !isDisabled(element));
     const pick = controls.find((element) => partyRe.test(norm(element.innerText)))
       ?? controls.find((element) => anyRe.test(norm(element.innerText)));
@@ -1370,7 +1415,7 @@ async function completeCrossPartyFactReview(page, config, createdCase, labelText
 
 function isDashboardPage(url = '', text = '') {
   return /\/dashboard(?:[/?#]|$)/i.test(String(url ?? ''))
-    || (/\bDashboard\b/i.test(String(text ?? '')) && /\bCreate New Case\b/i.test(String(text ?? '')));
+    || (/\bDashboard\b/i.test(String(text ?? '')) && /\bCreate New (?:Case|Discussion)\b/i.test(String(text ?? '')));
 }
 
 function capitalizeFirst(value = '') {
@@ -1409,7 +1454,7 @@ async function openCaseAlignmentReport(page, config, createdCase) {
     await openCaseFromDashboard(page, createdCase, config.run.caseType).catch(() => {});
     await waitForIdle(page);
   }
-  const namePattern = /Alignment Report|View Report|Open Report/i;
+  const namePattern = /Alignment Report|Alignment Brief|View Alignment Brief|View Report|Open Report/i;
   for (const role of ['link', 'button']) {
     const control = page.getByRole(role, { name: namePattern }).first();
     if (await control.isVisible({ timeout: 750 }).catch(() => false)) {
@@ -1858,7 +1903,11 @@ function participantFactRatingRequired(text) {
 }
 
 function isPostInterviewState(text) {
-  return /post-processing|post processing|fact statement|confident fact|statement labels?|submit labels?|label.*fact/i.test(text);
+  // "Excerpt Review" is the first screen after the interview ends (before fact
+  // labeling); recognizing it lets the interview loop exit cleanly and hand off to
+  // completeActorPostProcessing instead of waiting for a response input that will
+  // never reappear.
+  return /post-processing|post processing|fact statement|confident fact|statement labels?|submit labels?|label.*fact|excerpt review/i.test(text);
 }
 
 function isProcessingState(text) {
@@ -1887,8 +1936,8 @@ async function waitForRequestorGettingStarted(page, config, createdCase, synthet
     const text = await readVisibleBodyText(page);
     if (!otherPartyGate(text)) {
       const gettingStartedControl = page.locator('a[href*="/get-started"]').first();
-      const gettingStartedLink = page.getByRole('link', { name: /^Getting Started$/i }).first();
-      const gettingStartedButton = page.getByRole('button', { name: /^Getting Started$/i }).first();
+      const gettingStartedLink = page.getByRole('link', { name: /^(Getting Started|Begin Discussion)$/i }).first();
+      const gettingStartedButton = page.getByRole('button', { name: /^(Getting Started|Begin Discussion)$/i }).first();
       if (await gettingStartedControl.isVisible({ timeout: 300 }).catch(() => false)
         || await gettingStartedLink.isVisible({ timeout: 300 }).catch(() => false)
         || await gettingStartedButton.isVisible({ timeout: 300 }).catch(() => false)
@@ -2272,7 +2321,7 @@ async function openCaseFromDashboard(page, createdCase, caseType) {
 
 async function openCaseDetailsFromDashboard(page, createdCase, caseType) {
   if (!isDashboardPage(page.url(), await readVisibleBodyText(page))) return;
-  const opened = await clickCaseCardButton(page, createdCase, /^Case Details$/i)
+  const opened = await clickCaseCardButton(page, createdCase, /^(Case Details|Discussion Details)$/i)
     .then(() => true)
     .catch(() => false);
   if (opened) return;
@@ -2384,6 +2433,7 @@ export const workflowTestSupport = {
   gettingStartedAvailable,
   matchScenarioQuestion,
   matchScenarioCriterion,
+  selectScriptedAnswer,
   evaluateExpectedPartnerBehavior,
   interviewReadySignal,
   excerptReviewReady,

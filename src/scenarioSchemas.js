@@ -243,6 +243,35 @@ export const scenarioRunResultSchema = z.object({
   }).optional()
 });
 
+// Scripted primary-question answers: an alternative run mode where a tester
+// supplies the first response to each primary question for each actor. The
+// employee answer is used when the requestor is interviewed; the manager answer
+// when the participant is interviewed. Either side may be omitted for a given
+// question (that side then falls back to the LLM responder).
+export const scriptedAnswerEntrySchema = z.object({
+  primaryQuestionId: z.string().min(1),
+  employee: z.string().min(1).optional(),
+  manager: z.string().min(1).optional()
+}).refine((entry) => entry.employee || entry.manager, {
+  message: 'Each scripted answer must provide at least one of employee or manager.'
+});
+
+export const scriptedAnswersSchema = z.object({
+  schemaVersion: z.literal(1),
+  topicId: z.string().min(1),
+  name: z.string().min(1).optional(),
+  description: z.string().min(1).optional(),
+  answers: z.array(scriptedAnswerEntrySchema).min(1)
+}).superRefine((file, ctx) => {
+  const seen = new Set();
+  for (const [index, entry] of file.answers.entries()) {
+    if (seen.has(entry.primaryQuestionId)) {
+      ctx.addIssue({ code: 'custom', path: ['answers', index, 'primaryQuestionId'], message: `Duplicate primary question ID: ${entry.primaryQuestionId}` });
+    }
+    seen.add(entry.primaryQuestionId);
+  }
+});
+
 export function validateBehaviorCompatibility(schedule, catalog) {
   const definitions = new Map(catalog.behaviors.map((behavior) => [behavior.id, behavior]));
   const issues = [];

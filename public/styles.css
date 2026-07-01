@@ -128,6 +128,9 @@ textarea { padding: 10px; line-height: 1.4; resize: vertical; }
 input:focus, select:focus, textarea:focus { border-color: #1769d2; box-shadow: 0 0 0 3px rgba(23, 105, 210, .12); }
 .toggle { display: flex; grid-auto-flow: column; align-items: center; gap: 8px; }
 .toggle input, .behavior-enable input { width: 16px; height: 16px; }
+.scripted-answers { margin-top: 12px; display: grid; gap: 10px; }
+.scripted-answers .toggle { justify-content: start; }
+.scripted-answers .toggle input { flex: 0 0 16px; }
 
 .notice { margin: 12px 0; padding: 10px 12px; border-radius: 6px; font-size: 13px; line-height: 1.45; }
 .notice.error { border: 1px solid #e2a4a4; background: #fff1f1; color: #802424; }

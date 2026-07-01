@@ -1,0 +1,14 @@
+{
+  "topic": "Performance Review - Evaluation",
+  "caseType": "Performance Review - Evaluation",
+  "runMode": "full_workflow",
+  "workflowScope": "requestor_participant",
+  "testObjective": "Run one complete synthetic Common Ground workflow for Performance Review - Evaluation using scripted first responses for the Controller (employee) and manager, and record alignment results.",
+  "alignmentScenarioId": "one_step_misaligned_sometimes",
+  "scenarioSeed": "",
+  "numberOfCases": 1,
+  "maxTurns": 50,
+  "stopOnFailure": true,
+  "qualityCriteriaPath": "config/case-types/performance-review-evaluation.json",
+  "scriptedAnswersPath": "config/scripted-answers/performance-review-evaluation.json"
+}

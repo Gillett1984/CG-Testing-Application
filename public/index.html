@@ -92,6 +92,17 @@
           <textarea id="testObjective" rows="3"></textarea>
         </label>
 
+        <div class="full scripted-answers">
+          <label class="toggle">
+            <input id="scriptedEnabled" type="checkbox">
+            <span>Use scripted first answers (loads pre-authored answers per primary question; disables behaviors)</span>
+          </label>
+          <label id="scriptedAnswersField" hidden>
+            <span>Scripted Answers File</span>
+            <select id="scriptedAnswersPath"></select>
+          </label>
+        </div>
+
         <div id="topicUnsupported" class="notice error" hidden></div>
       </section>
 

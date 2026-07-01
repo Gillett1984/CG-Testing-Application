@@ -47,6 +47,38 @@ path is `full_workflow` (`runFullWorkflow` in `src/commonGroundAutomation.js`):
 5. Wait through post-processing, open the Alignment Report, scrape the score.
 6. Assemble `artifacts` and write `run.json` (in a `finally`).
 
+### Scripted-answers mode (alternative response source)
+
+An opt-in layer (not a separate run mode) that supplies the **first response to
+each primary question** for each actor instead of generating it. Enabled by
+`scriptedAnswersPath` (run-config field or `--scripted-answers <path>`); composes
+with any `workflowScope`. Mechanics:
+
+- File format: `config/scripted-answers/*.json` — `{ schemaVersion, topicId,
+  answers: [{ primaryQuestionId, employee?, manager? }] }`. In the live app the
+  invited participant is the Employee (first-person self-evaluation) and the
+  requestor who created the case is the Manager (third-person), so `employee` is
+  used for the **participant** and `manager` for the **requestor** (see
+  `src/scriptedAnswers.js`, schema in `src/scenarioSchemas.js`). The LLM follow-up
+  perspective is flipped to match in scripted mode (`resolveActorPerspective` in
+  `src/llmResponder.js`), and scripted follow-ups are grounded in the transcript
+  rather than the scenario dossier so the interviewee's role stays consistent. The
+  example file documents the shape.
+- The live Common Ground prompt is matched to a `primaryQuestionId` with the same
+  fuzzy matcher used for scenario turns (`src/questionMatching.js`,
+  `matchScenarioQuestionScored`). Manager questions mirror the employee questions,
+  so the employee-worded `primaryQuestions` match both actors. If matching fails,
+  a sequential fallback assigns the next unanswered question in file order.
+- Only the **first** turn of each primary question is scripted; follow-ups, and
+  questions with no scripted answer, fall back to the normal LLM responder. Runs
+  are **clean**: behaviors and test maneuvers are not injected.
+- Per-turn diagnostics in `run.json` transcripts: `responseSource`
+  (`scripted`/`llm`) and `scriptedAnswer` (`primaryQuestionId`, `matchConfidence`,
+  `matchScore`); rolled up into `summary.json` `scriptedAnswerCoverage`. Selection
+  logic: `selectScriptedAnswer` in `src/commonGroundAutomation.js`.
+- Validate a file offline (schema + topic cross-check + matcher dry-run) with
+  `npm run validate:scripted [answersPath] [topicPath]`.
+
 ## Install & run
 
 ```bash

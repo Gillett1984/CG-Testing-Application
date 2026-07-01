@@ -12,6 +12,9 @@ const fields = {
   stopOnFailure: document.querySelector('#stopOnFailure'),
   testObjective: document.querySelector('#testObjective'),
   headed: document.querySelector('#headed'),
+  scriptedEnabled: document.querySelector('#scriptedEnabled'),
+  scriptedAnswersPath: document.querySelector('#scriptedAnswersPath'),
+  scriptedAnswersField: document.querySelector('#scriptedAnswersField'),
   behaviorCount: document.querySelector('#behaviorCount'),
   draftCaseType: document.querySelector('#draftCaseType'),
   draftSourceFile: document.querySelector('#draftSourceFile'),
@@ -116,6 +119,8 @@ elements.stopRun.addEventListener('click', async () => {
   startPolling();
 });
 
+fields.scriptedEnabled.addEventListener('change', updateScriptedAnswersField);
+
 elements.showRunner.addEventListener('click', () => showWorkspace('runner'));
 elements.showTopicSetup.addEventListener('click', () => showWorkspace('topic'));
 elements.refreshDrafts.addEventListener('click', loadTopicDrafts);
@@ -147,10 +152,31 @@ async function boot() {
     `UI build: ${defaults.uiBuild ?? 'unknown'}`
   ].join(' | ');
   updateModeFields();
+  await loadScriptedAnswerFiles();
   await applyScenarioData(defaults.scenarioData, defaults.qualityCriteria, defaults.runConfig.alignmentScenarioId);
   await loadTopicDrafts();
   await loadRunHistory();
   await updateStatus();
+}
+
+async function loadScriptedAnswerFiles() {
+  let files = [];
+  try {
+    files = (await api('/api/scripted-answers')).files ?? [];
+  } catch {
+    files = [];
+  }
+  fields.scriptedAnswersPath.innerHTML = files.length
+    ? files.map((file) => `<option value="${file.path}">${file.name}</option>`).join('')
+    : '<option value="">No files in config/scripted-answers</option>';
+  const hasFiles = files.length > 0;
+  fields.scriptedEnabled.disabled = !hasFiles;
+  if (!hasFiles) fields.scriptedEnabled.checked = false;
+  updateScriptedAnswersField();
+}
+
+function updateScriptedAnswersField() {
+  fields.scriptedAnswersField.hidden = !fields.scriptedEnabled.checked;
 }
 
 async function loadTopic(caseType) {
@@ -420,7 +446,8 @@ function collectPayload() {
       numberOfCases: Number(fields.numberOfCases.value),
       maxTurns: Number(fields.maxTurns.value),
       stopOnFailure: fields.stopOnFailure.value === 'true',
-      qualityCriteriaPath: scenarioData.criteriaPath
+      qualityCriteriaPath: scenarioData.criteriaPath,
+      scriptedAnswersPath: fields.scriptedEnabled.checked ? fields.scriptedAnswersPath.value : ''
     },
     qualityCriteria,
     behaviorSchedule

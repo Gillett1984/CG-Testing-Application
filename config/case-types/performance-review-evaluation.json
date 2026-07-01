@@ -1,0 +1,838 @@
+{
+  "schemaVersion": 2,
+  "topicId": "performance_review_evaluation",
+  "caseType": "Performance Review - Evaluation",
+  "description": "High-quality answer criteria for the Performance Review - Evaluation Getting Started interview. Formal employee self-evaluation in preparation for a review conversation.",
+  "workflow": {
+    "actors": [
+      "requestor",
+      "participant"
+    ],
+    "factStatementLabel": "Confident Fact",
+    "postProcessingTimeoutMs": 600000
+  },
+  "terms": [
+    {
+      "id": "role_scope",
+      "label": "Role Scope & Evaluation Context",
+      "description": "The responsibilities, ownership areas, priorities, and expectations the performance should be evaluated against during the review period."
+    },
+    {
+      "id": "goals_expectations",
+      "label": "Goals, Expectations & Success Measures",
+      "description": "The goals, deliverables, and success measures that mattered most and how clearly they were communicated or understood."
+    },
+    {
+      "id": "results_impact",
+      "label": "Results & Business Impact",
+      "description": "Outcomes achieved and the value those outcomes created for customers, teams, or the organization, with supporting evidence."
+    },
+    {
+      "id": "execution_ownership",
+      "label": "Execution, Ownership & Reliability",
+      "description": "Follow-through on commitments, prioritization, accountability, and consistent, reliable delivery of responsibilities."
+    },
+    {
+      "id": "quality_craft",
+      "label": "Quality & Craft",
+      "description": "Accuracy, completeness, thoroughness, professional standards, and care applied to work products and decisions."
+    },
+    {
+      "id": "communication_collaboration",
+      "label": "Communication, Collaboration & Professionalism",
+      "description": "Clarity, responsiveness, coordination, trust, and effectiveness when working with the manager, peers, and stakeholders."
+    },
+    {
+      "id": "judgement_growth",
+      "label": "Judgment, Growth & Readiness",
+      "description": "Decision quality, self-awareness, learning, adaptability, development, and readiness for broader responsibility."
+    },
+    {
+      "id": "context_fairness",
+      "label": "Context, Fairness & Next-Period Expectations",
+      "description": "Contextual factors, constraints, resources, and fairness considerations relevant to a balanced evaluation, plus expectations to clarify for the next period."
+    }
+  ],
+  "ratingScale": [
+    {
+      "id": "unsatisfactory",
+      "label": "Unsatisfactory",
+      "score": 0,
+      "responseProfile": {
+        "stance": "Performance consistently falls materially short of expectations.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "needs_improvement",
+      "label": "Needs Improvement",
+      "score": 1,
+      "responseProfile": {
+        "stance": "Performance has meaningful gaps and requires focused improvement.",
+        "evidenceStrength": "moderate",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "meets_expectations",
+      "label": "Meets Expectations",
+      "score": 2,
+      "responseProfile": {
+        "stance": "Performance reliably fulfills the expectations of the role.",
+        "evidenceStrength": "moderate",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "exceeds_expectations",
+      "label": "Exceeds Expectations",
+      "score": 3,
+      "responseProfile": {
+        "stance": "Performance frequently surpasses normal expectations.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "outstanding",
+      "label": "Outstanding",
+      "score": 4,
+      "responseProfile": {
+        "stance": "Performance significantly and consistently surpasses expectations.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    }
+  ],
+  "primaryQuestions": [
+    {
+      "id": "performance_review_evaluation_q1_review_role_scope_evaluation_context",
+      "discussionArea": "Review Role Scope & Evaluation Context",
+      "question": "During this review period, what role responsibilities, priorities, and expectations should your performance be evaluated against?",
+      "answerGuidance": [
+        "Your current role/title or functional position during the review period",
+        "The responsibilities, ownership areas, or priorities you believe should be evaluated",
+        "The expectations or success standards you believe applied to those responsibilities",
+        "Any temporary projects, expanded scope, or special assignments that should be considered",
+        "Any changes in role scope, ownership, or priorities during the review period",
+        "Any responsibilities or expectations that were unclear or interpreted differently"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_evaluation_q1_review_role_scope_evaluation_context_criterion_1",
+          "requirement": "States current role/title or functional position during the review period.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "role_scope"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q1_review_role_scope_evaluation_context_criterion_2",
+          "requirement": "Lists one or more core responsibilities, ownership areas, or priorities that were part of the role during the review period.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "role_scope"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q1_review_role_scope_evaluation_context_criterion_3",
+          "requirement": "Describes each responsibility, ownership area, or priority in concrete, understandable terms.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "role_scope"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q1_review_role_scope_evaluation_context_criterion_4",
+          "requirement": "Identifies the role expectations, success standards, or contribution level the employee believes should apply to those responsibilities.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "role_scope"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q1_review_role_scope_evaluation_context_criterion_5",
+          "requirement": "Distinguishes recurring responsibilities from temporary assignments, special projects, or expanded scope.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "role_scope"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q1_review_role_scope_evaluation_context_criterion_6",
+          "requirement": "Identifies any meaningful changes in role scope, ownership, priorities, or responsibilities during the review period.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "role_scope"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q1_review_role_scope_evaluation_context_criterion_7",
+          "requirement": "Explains why those role, scope, ownership, or priority changes occurred.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "role_scope"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q1_review_role_scope_evaluation_context_criterion_8",
+          "requirement": "Notes any uncertainty, disagreement, or ambiguity about which responsibilities should be included in the evaluation.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "role_scope"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "role_scope"
+    },
+    {
+      "id": "performance_review_evaluation_q2_goals_expectations_success_measures",
+      "discussionArea": "Goals, Expectations & Success Measures",
+      "question": "What goals, deliverables, or success measures were most important during the review period, and how clearly were they understood?",
+      "answerGuidance": [
+        "The goals, deliverables, priorities, or success measures that mattered most",
+        "How success was supposed to be measured or recognized",
+        "Any targets, deadlines, standards, or expected outcomes tied to those goals",
+        "How clearly those expectations were communicated or understood",
+        "Whether expectations changed during the review period",
+        "Any goals that were formally assigned versus informally understood"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_evaluation_q2_goals_expectations_success_measures_criterion_1",
+          "requirement": "Lists one or more goals, deliverables, priorities, or success measures that were important during the review period.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "goals_expectations"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q2_goals_expectations_success_measures_criterion_2",
+          "requirement": "Describes each goal, deliverable, priority, or success measure in concrete, understandable terms.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "goals_expectations"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q2_goals_expectations_success_measures_criterion_3",
+          "requirement": "Explains why each listed goal, deliverable, priority, or success measure mattered to the team, customer, organization, or role.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "goals_expectations"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q2_goals_expectations_success_measures_criterion_4",
+          "requirement": "States how clearly the expectations or success measures were communicated or understood during the review period.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "goals_expectations"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q2_goals_expectations_success_measures_criterion_5",
+          "requirement": "Cites measurable targets, deadlines, quality standards, customer outcomes, or other evidence-based success indicators.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "goals_expectations"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q2_goals_expectations_success_measures_criterion_6",
+          "requirement": "Distinguishes goals that were formally assigned from goals that were implied, evolving, or informally understood.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "goals_expectations"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q2_goals_expectations_success_measures_criterion_7",
+          "requirement": "Identifies any goals, deliverables, or success measures that changed during the review period.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "goals_expectations"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q2_goals_expectations_success_measures_criterion_8",
+          "requirement": "Explains how changes to goals, deliverables, or success measures affected performance expectations.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "goals_expectations"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "goals_expectations"
+    },
+    {
+      "id": "performance_review_evaluation_q3_results_business_impact",
+      "discussionArea": "Results & Business Impact",
+      "question": "What results or business impact did you deliver during the review period, and what evidence best supports your view?",
+      "answerGuidance": [
+        "The most important outcomes, accomplishments, or contributions from the review period",
+        "What specifically was achieved, improved, delivered, stabilized, or solved",
+        "Why those results mattered to the team, customer, organization, or role",
+        "Evidence that supports your view of the impact",
+        "Actions you personally took that contributed to the outcomes",
+        "Results that met, exceeded, or fell short of expectations, and why"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_evaluation_q3_results_business_impact_criterion_1",
+          "requirement": "Lists one or more results, accomplishments, outcomes, or meaningful contributions from the review period.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "results_impact"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q3_results_business_impact_criterion_2",
+          "requirement": "Describes each result, accomplishment, outcome, or contribution in detail.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "results_impact"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q3_results_business_impact_criterion_3",
+          "requirement": "Explains why each result, accomplishment, outcome, or contribution mattered.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "results_impact"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q3_results_business_impact_criterion_4",
+          "requirement": "Connects each result, accomplishment, outcome, or contribution to one or more relevant goals, priorities, responsibilities, or expected outcomes.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "results_impact"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q3_results_business_impact_criterion_5",
+          "requirement": "Cites measurable results, metrics, deadlines met, customer outcomes, business outcomes, or other evidence of impact.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "results_impact"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q3_results_business_impact_criterion_6",
+          "requirement": "Provides examples of actions personally taken that contributed to the result or impact.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "results_impact"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q3_results_business_impact_criterion_7",
+          "requirement": "Highlights results that exceeded, met, or fell short of expectations and explains why.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "results_impact"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q3_results_business_impact_criterion_8",
+          "requirement": "Connects results to team, customer, department, operational, financial, or organizational outcomes.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "results_impact"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "results_impact"
+    },
+    {
+      "id": "performance_review_evaluation_q4_execution_ownership_reliability",
+      "discussionArea": "Execution, Ownership & Reliability",
+      "question": "How consistently did you follow through on commitments, manage priorities, and take ownership of work during the review period?",
+      "answerGuidance": [
+        "How reliably you followed through on commitments, deadlines, and responsibilities",
+        "Examples of ownership, accountability, prioritization, or proactive problem solving",
+        "Where execution was especially strong or inconsistent",
+        "Any missed, delayed, reprioritized, or escalated work and why it happened",
+        "How much direction, oversight, approval, or support was needed",
+        "How your execution affected team progress, customers, or business outcomes"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_evaluation_q4_execution_ownership_reliability_criterion_1",
+          "requirement": "Describes how the employee followed through on commitments, deadlines, deliverables, or responsibilities during the review period.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q4_execution_ownership_reliability_criterion_2",
+          "requirement": "Identifies one or more examples that demonstrate ownership, accountability, prioritization, or reliability.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q4_execution_ownership_reliability_criterion_3",
+          "requirement": "Explains how those examples affected work progress, team outcomes, customer outcomes, or manager confidence.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q4_execution_ownership_reliability_criterion_4",
+          "requirement": "States whether execution and ownership were consistent, uneven, improving, or constrained during the review period.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q4_execution_ownership_reliability_criterion_5",
+          "requirement": "Identifies commitments, deadlines, or responsibilities that were missed, delayed, reprioritized, or escalated.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q4_execution_ownership_reliability_criterion_6",
+          "requirement": "Explains the reason missed, delayed, reprioritized, or escalated work occurred.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q4_execution_ownership_reliability_criterion_7",
+          "requirement": "Provides examples of proactively identifying risks, solving problems, or escalating issues early.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q4_execution_ownership_reliability_criterion_8",
+          "requirement": "Distinguishes work the employee owned independently from work that required manager direction, approval, or cross-functional dependency.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "execution_ownership"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "execution_ownership"
+    },
+    {
+      "id": "performance_review_evaluation_q5_quality_craft",
+      "discussionArea": "Quality & Craft",
+      "question": "How would you describe the quality, accuracy, thoroughness, and professionalism of your work during the review period?",
+      "answerGuidance": [
+        "The quality, accuracy, thoroughness, and professionalism of your work",
+        "Examples of deliverables or work products that show your quality standard",
+        "Whether quality was consistent, improving, uneven, or constrained",
+        "Any errors, rework, missed details, or quality issues and what caused them",
+        "Evidence that supports your view of quality",
+        "Training, tools, time, review processes, or support that affected quality"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_evaluation_q5_quality_craft_criterion_1",
+          "requirement": "Describes the quality, accuracy, completeness, thoroughness, or professionalism of the employee's work during the review period.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "quality_craft"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q5_quality_craft_criterion_2",
+          "requirement": "Identifies one or more examples of work quality, craft, technical skill, accuracy, or attention to detail.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "quality_craft"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q5_quality_craft_criterion_3",
+          "requirement": "Explains how each example met, exceeded, or fell short of the quality standard expected for the role.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "quality_craft"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q5_quality_craft_criterion_4",
+          "requirement": "States whether work quality was consistent, uneven, improving, or constrained during the review period.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "quality_craft"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q5_quality_craft_criterion_5",
+          "requirement": "Cites evidence such as reduced rework, error rates, stakeholder feedback, audit results, review outcomes, or deliverable acceptance.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "quality_craft"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q5_quality_craft_criterion_6",
+          "requirement": "Identifies any errors, missed details, rework, quality issues, or preventable problems that occurred.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "quality_craft"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q5_quality_craft_criterion_7",
+          "requirement": "Explains the causes of any errors, missed details, rework, quality issues, or preventable problems.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "quality_craft"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q5_quality_craft_criterion_8",
+          "requirement": "Notes any training, tools, time, review process, or support that affected work quality.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "quality_craft"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "quality_craft"
+    },
+    {
+      "id": "performance_review_evaluation_q6_communication_collaboration_professionalism",
+      "discussionArea": "Communication, Collaboration & Professionalism",
+      "question": "How did your communication, collaboration, and professionalism affect your performance during the review period?",
+      "answerGuidance": [
+        "How you communicated with your manager during the review period",
+        "How you communicated and collaborated with peers, customers, contractors, or stakeholders",
+        "How updates, feedback, meetings, handoffs, and escalations typically worked",
+        "Communication or collaboration practices that helped performance",
+        "Communication or collaboration issues that created friction, delay, confusion, or negative outcomes",
+        "Examples and causes of communication successes or breakdowns",
+        "Improvements that would support stronger collaboration next period"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_evaluation_q6_communication_collaboration_professionalism_criterion_1",
+          "requirement": "Describes typical communication with the manager, including clarity, responsiveness, transparency, tone, preparedness, or follow-through.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "communication_collaboration"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q6_communication_collaboration_professionalism_criterion_2",
+          "requirement": "Describes communication or collaboration with peers, customers, contractors, stakeholders, or cross-functional partners.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "communication_collaboration"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q6_communication_collaboration_professionalism_criterion_3",
+          "requirement": "Explains how coordination, updates, meetings, handoffs, feedback, or escalation typically happened.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "communication_collaboration"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q6_communication_collaboration_professionalism_criterion_4",
+          "requirement": "Identifies communication, collaboration, or professionalism practices that supported positive outcomes.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "communication_collaboration"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q6_communication_collaboration_professionalism_criterion_5",
+          "requirement": "Identifies communication, collaboration, or professionalism practices causing breakdowns, friction, delays, confusion, or negative outcomes.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "communication_collaboration"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q6_communication_collaboration_professionalism_criterion_6",
+          "requirement": "Provides one or more examples of how communication, collaboration, or professionalism positively affected an outcome.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "communication_collaboration"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q6_communication_collaboration_professionalism_criterion_7",
+          "requirement": "Provides one or more examples of how communication, collaboration, or professionalism negatively affected an outcome.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "communication_collaboration"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q6_communication_collaboration_professionalism_criterion_8",
+          "requirement": "Explains the causes of one or more communication, collaboration, or professionalism breakdowns.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "communication_collaboration"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "communication_collaboration"
+    },
+    {
+      "id": "performance_review_evaluation_q7_judgment_growth_readiness",
+      "discussionArea": "Judgment, Growth & Readiness",
+      "question": "How did your judgment, learning, adaptability, and professional growth develop during the review period?",
+      "answerGuidance": [
+        "How your judgment, learning, adaptability, independence, or coachability developed",
+        "Examples of applying feedback, adapting to change, or making stronger decisions",
+        "How your growth affected performance or readiness for broader responsibility",
+        "Development areas, judgment gaps, or readiness gaps that remain",
+        "Support, coaching, training, mentorship, exposure, or stretch work that would help",
+        "Which development areas should be prioritized next, and why"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_evaluation_q7_judgment_growth_readiness_criterion_1",
+          "requirement": "Identifies one or more areas of judgment, learning, adaptability, independence, coachability, or professional growth demonstrated during the review period.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "judgement_growth"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q7_judgment_growth_readiness_criterion_2",
+          "requirement": "Describes each area of judgment, learning, adaptability, independence, coachability, or professional growth in concrete, understandable terms.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "judgement_growth"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q7_judgment_growth_readiness_criterion_3",
+          "requirement": "Explains how each area of growth affected performance, role effectiveness, team outcomes, or readiness for broader responsibility.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "judgement_growth"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q7_judgment_growth_readiness_criterion_4",
+          "requirement": "Identifies one or more development areas, judgment gaps, learning needs, or readiness gaps that remain.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "judgement_growth"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q7_judgment_growth_readiness_criterion_5",
+          "requirement": "Provides examples of applying feedback, adapting to change, making better decisions, or becoming more independent over time.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "judgement_growth"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q7_judgment_growth_readiness_criterion_6",
+          "requirement": "Explains what support, coaching, training, mentorship, exposure, or stretch work would help address remaining development needs.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "judgement_growth"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q7_judgment_growth_readiness_criterion_7",
+          "requirement": "Distinguishes current-role growth from readiness for expanded scope, advancement, or next-level responsibility.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "judgement_growth"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q7_judgment_growth_readiness_criterion_8",
+          "requirement": "Prioritizes which development areas should be addressed next and explains why.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "judgement_growth"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "judgement_growth"
+    },
+    {
+      "id": "performance_review_evaluation_q8_context_fairness_next_period_expectations",
+      "discussionArea": "Context, Fairness & Next-Period Expectations",
+      "question": "What context, constraints, resources, or fairness considerations should be taken into account when evaluating your performance, and what expectations should be clarified for the next period?",
+      "answerGuidance": [
+        "Contextual factors that affected performance during the review period",
+        "Constraints involving workload, staffing, tools, systems, timing, market conditions, or cross-functional dependencies",
+        "Fairness considerations, including whether expectations or comparisons were applied consistently",
+        "How context affected results, execution, quality, communication, or growth",
+        "Expectations, priorities, or success measures that should be clearer next period",
+        "Support, resources, or changes that would make future performance evaluation more accurate and fair"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_evaluation_q8_context_fairness_next_period_expectations_criterion_1",
+          "requirement": "Identifies one or more contextual factors, constraints, resources, or fairness considerations that affected performance during the review period.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "context_fairness"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q8_context_fairness_next_period_expectations_criterion_2",
+          "requirement": "Describes each contextual factor, constraint, resource, or fairness consideration clearly and concretely.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "context_fairness"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q8_context_fairness_next_period_expectations_criterion_3",
+          "requirement": "Explains how each contextual factor, constraint, resource, or fairness consideration affected results, execution, quality, communication, or growth.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "context_fairness"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q8_context_fairness_next_period_expectations_criterion_4",
+          "requirement": "Identifies one or more expectations, priorities, support needs, or success measures that should be clarified for the next review period.",
+          "required": true,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "context_fairness"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q8_context_fairness_next_period_expectations_criterion_5",
+          "requirement": "Provides examples of staffing, workload, tools, systems, market conditions, inherited challenges, timing, or cross-functional dependencies that affected performance.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "context_fairness"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q8_context_fairness_next_period_expectations_criterion_6",
+          "requirement": "Compares the employee's circumstances to peers, comparable roles, prior periods, or expected resource levels when relevant.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "context_fairness"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q8_context_fairness_next_period_expectations_criterion_7",
+          "requirement": "Explains whether performance should be interpreted differently because of constraints, resource levels, changing expectations, or unusual conditions.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "context_fairness"
+          ]
+        },
+        {
+          "id": "performance_review_evaluation_q8_context_fairness_next_period_expectations_criterion_8",
+          "requirement": "Suggests concrete next-period priorities, support, resources, or success measures that would make evaluation clearer and more fair.",
+          "required": false,
+          "label": "Performance Review Evaluation",
+          "termIds": [
+            "context_fairness"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "context_fairness"
+    }
+  ]
+}

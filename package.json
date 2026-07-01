@@ -12,7 +12,8 @@
     "validate:scenarios": "node scripts/validateScenarioController.js",
     "validate:workflow": "node scripts/validateFullWorkflow.js",
     "validate:fact-labeling": "node scripts/validateFactLabelingWorkflow.js",
-    "validate:onboarding": "node scripts/validateTopicOnboarding.js"
+    "validate:onboarding": "node scripts/validateTopicOnboarding.js",
+    "validate:scripted": "node scripts/validateScriptedAnswers.js"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

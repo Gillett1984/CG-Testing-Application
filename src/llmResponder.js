@@ -221,6 +221,7 @@ function isCompactStyleFailure(validation) {
 function buildGenerationInput(context, promptContext, activeQualityCriteria) {
   const actorPerspective = resolveActorPerspective({
     actorRole: context.actorRole ?? 'requestor',
+    scriptedMode: context.scriptedMode ?? false,
     promptContext,
     transcript: context.transcript,
     topic: context.topic
@@ -1440,25 +1441,20 @@ function withBehaviorValidation(result, behaviorCheck = {}) {
   };
 }
 
-function resolveActorPerspective({ actorRole, promptContext, transcript, topic }) {
-  if (actorRole === 'requestor') return 'employee_self_assessment';
-
-  const partnerContext = [
-    promptContext?.latestPartnerTurn,
-    promptContext?.activeQuestion,
-    ...(transcript ?? [])
-      .filter((entry) => entry.role === 'partnerAi')
-      .slice(0, 3)
-      .map((entry) => entry.text)
-  ].filter(Boolean).join(' ');
-  const normalizedContext = normalize(partnerContext);
-  if (/\b(?:as (?:the |their )?manager|from your perspective as (?:the )?manager|this employee|the employee|employee's|employee is|employee has|their role|their performance)\b/.test(normalizedContext)) {
-    return 'manager_evaluating_employee';
+function resolveActorPerspective({ actorRole, scriptedMode }) {
+  // Perspective is fixed by the assigned actor role, not inferred per turn.
+  // In scripted-answers mode the live Common Ground role assignment applies: the
+  // invited participant is the employee doing a self-assessment (first person) and
+  // the requestor who created the case is the manager evaluating the employee
+  // (third person). This matches the scripted answer mapping in scriptedAnswers.js
+  // (participant = employee answer, requestor = manager answer).
+  if (scriptedMode) {
+    return actorRole === 'participant' ? 'employee_self_assessment' : 'manager_evaluating_employee';
   }
-
-  const topicText = normalize(`${topic ?? ''}`);
-  if (/performance review|raise/.test(topicText)) return 'manager_evaluating_employee';
-  return 'participant_self_perspective';
+  // Scenario (non-scripted) mode keeps the original mapping, which mirrors the
+  // actor->dossier mapping hardcoded in scenarioController.js (requestor = employee
+  // positions, participant = manager positions).
+  return actorRole === 'participant' ? 'manager_evaluating_employee' : 'employee_self_assessment';
 }
 
 function questionRequiresExplicitScenarioRating(input) {

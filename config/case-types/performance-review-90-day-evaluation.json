@@ -1,0 +1,848 @@
+{
+  "schemaVersion": 2,
+  "topicId": "performance_review_90_day_evaluation",
+  "caseType": "Performance Review - 90 Day Evaluation",
+  "description": "High-quality answer criteria for the Performance Review - 90 Day Evaluation Getting Started interview. Employee self-evaluation approximately 90 days after starting a new role, joining a new team, or assuming materially different responsibilities.",
+  "workflow": {
+    "actors": [
+      "requestor",
+      "participant"
+    ],
+    "factStatementLabel": "Confident Fact",
+    "postProcessingTimeoutMs": 600000
+  },
+  "terms": [
+    {
+      "id": "role_understanding",
+      "label": "Role Understanding & Early Responsibilities",
+      "description": "The responsibilities, priorities, and expectations the employee understands to be most important during the early period in the role."
+    },
+    {
+      "id": "onboarding_training",
+      "label": "Onboarding, Training & Ramp-Up",
+      "description": "Onboarding, training, guidance, tools, access, and support received and how it affected the ability to perform."
+    },
+    {
+      "id": "early_progress",
+      "label": "Early Progress & Contributions",
+      "description": "Early results, accomplishments, and contributions and the evidence that supports them."
+    },
+    {
+      "id": "execution_ownership",
+      "label": "Execution, Ownership & Follow-Through",
+      "description": "Follow-through on commitments, prioritization, accountability, and reliable delivery during the early period."
+    },
+    {
+      "id": "work_quality",
+      "label": "Work Quality & Learning Curve",
+      "description": "Accuracy, completeness, thoroughness, and professionalism of work relative to what is expected at this stage of ramp-up."
+    },
+    {
+      "id": "communication_feedback",
+      "label": "Communication, Feedback & Working Relationships",
+      "description": "Clarity, responsiveness, coordination, and effectiveness of communication and feedback with the manager and others."
+    },
+    {
+      "id": "challenges_support",
+      "label": "Challenges, Constraints & Support Needs",
+      "description": "Challenges, constraints, resource needs, and support needs affecting early success."
+    },
+    {
+      "id": "growth_next_period",
+      "label": "Growth, Adjustment & Next-Period Priorities",
+      "description": "Lessons learned about succeeding in the role and priorities, development areas, and success measures for the next period."
+    }
+  ],
+  "ratingScale": [
+    {
+      "id": "unsatisfactory",
+      "label": "Unsatisfactory",
+      "score": 0,
+      "responseProfile": {
+        "stance": "Performance consistently falls materially short of expectations.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "needs_improvement",
+      "label": "Needs Improvement",
+      "score": 1,
+      "responseProfile": {
+        "stance": "Performance has meaningful gaps and requires focused improvement.",
+        "evidenceStrength": "moderate",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "meets_expectations",
+      "label": "Meets Expectations",
+      "score": 2,
+      "responseProfile": {
+        "stance": "Performance reliably fulfills the expectations of the role.",
+        "evidenceStrength": "moderate",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "exceeds_expectations",
+      "label": "Exceeds Expectations",
+      "score": 3,
+      "responseProfile": {
+        "stance": "Performance frequently surpasses normal expectations.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "outstanding",
+      "label": "Outstanding",
+      "score": 4,
+      "responseProfile": {
+        "stance": "Performance significantly and consistently surpasses expectations.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    }
+  ],
+  "primaryQuestions": [
+    {
+      "id": "performance_review_90_day_evaluation_q1_role_understanding_early_responsibilities",
+      "discussionArea": "Role Understanding & Early Responsibilities",
+      "question": "During your first period in this role, what responsibilities, priorities, and expectations have you understood to be most important?",
+      "answerGuidance": [
+        "Your current role/title or functional position",
+        "The responsibilities, ownership areas, or priorities you understand to be most important",
+        "The expectations or success standards you believe apply at this stage",
+        "Which responsibilities are core to the role versus part of onboarding or early ramp-up",
+        "Any areas where role scope, decision rights, ownership, or priorities remain unclear",
+        "Any changes in responsibilities or priorities since you started"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_90_day_evaluation_q1_role_understanding_early_responsibilities_criterion_1",
+          "requirement": "States current role/title or functional position during the early review period",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "role_understanding"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q1_role_understanding_early_responsibilities_criterion_2",
+          "requirement": "Lists one or more responsibilities, ownership areas, or priorities the employee understands to be important in the role",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "role_understanding"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q1_role_understanding_early_responsibilities_criterion_3",
+          "requirement": "Describes each responsibility, ownership area, or priority in concrete, understandable terms",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "role_understanding"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q1_role_understanding_early_responsibilities_criterion_4",
+          "requirement": "Identifies the expectations, success standards, or contribution level the employee believes apply to those responsibilities at this stage",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "role_understanding"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q1_role_understanding_early_responsibilities_criterion_5",
+          "requirement": "Distinguishes responsibilities that are core to the role from temporary assignments, onboarding tasks, or early ramp-up priorities",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "role_understanding"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q1_role_understanding_early_responsibilities_criterion_6",
+          "requirement": "Identifies any areas where role scope, ownership, decision rights, or priorities remain unclear",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "role_understanding"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q1_role_understanding_early_responsibilities_criterion_7",
+          "requirement": "Explains how unclear role scope, ownership, decision rights, or priorities have affected early performance or confidence",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "role_understanding"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q1_role_understanding_early_responsibilities_criterion_8",
+          "requirement": "Notes any responsibilities or priorities that changed after the employee started in the role",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "role_understanding"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "role_understanding"
+    },
+    {
+      "id": "performance_review_90_day_evaluation_q2_onboarding_training_ramp_up",
+      "discussionArea": "Onboarding, Training & Ramp-Up",
+      "question": "What onboarding, training, guidance, or support have you received so far, and how has it affected your ability to perform in the role?",
+      "answerGuidance": [
+        "Training, onboarding, coaching, documentation, system access, tools, or feedback you have received",
+        "How that support helped you understand or perform the role",
+        "Support from your manager, peers, systems, HR, or other resources",
+        "Any missing training, unclear guidance, tool gaps, access issues, or documentation gaps",
+        "How any gaps affected your performance, confidence, learning speed, or work quality",
+        "Specific support that would help you ramp up more effectively next period"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_90_day_evaluation_q2_onboarding_training_ramp_up_criterion_1",
+          "requirement": "Lists one or more forms of onboarding, training, guidance, access, tools, feedback, or support received so far",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "onboarding_training"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q2_onboarding_training_ramp_up_criterion_2",
+          "requirement": "Describes each form of onboarding, training, guidance, access, tools, feedback, or support in concrete, understandable terms",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "onboarding_training"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q2_onboarding_training_ramp_up_criterion_3",
+          "requirement": "Explains how each form of onboarding, training, guidance, access, tools, feedback, or support affected the employee's ability to perform",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "onboarding_training"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q2_onboarding_training_ramp_up_criterion_4",
+          "requirement": "Identifies one or more onboarding, training, guidance, access, tool, or support gaps that still exist",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "onboarding_training"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q2_onboarding_training_ramp_up_criterion_5",
+          "requirement": "Distinguishes support provided by the manager from support provided by peers, systems, documentation, HR, training programs, or other resources",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "onboarding_training"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q2_onboarding_training_ramp_up_criterion_6",
+          "requirement": "Explains how remaining gaps affect results, execution, quality, communication, confidence, or learning speed",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "onboarding_training"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q2_onboarding_training_ramp_up_criterion_7",
+          "requirement": "Provides examples of specific training, coaching, documentation, access, or guidance that helped the employee ramp up",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "onboarding_training"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q2_onboarding_training_ramp_up_criterion_8",
+          "requirement": "Suggests one or more specific support changes that would improve performance in the next period",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "onboarding_training"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "onboarding_training"
+    },
+    {
+      "id": "performance_review_90_day_evaluation_q3_early_progress_contributions",
+      "discussionArea": "Early Progress & Contributions",
+      "question": "What progress, accomplishments, or contributions have you made so far, and what evidence best supports your view?",
+      "answerGuidance": [
+        "Early accomplishments, completed deliverables, improvements, or meaningful contributions",
+        "What specifically was achieved, improved, delivered, learned, stabilized, or solved",
+        "Why those contributions mattered to the team, customer, organization, or role",
+        "How your progress connects to responsibilities, priorities, or expectations",
+        "Evidence such as metrics, deadlines, customer outcomes, stakeholder feedback, or examples",
+        "Work completed independently versus with guidance, review, or team support",
+        "Any expected outcomes that are not complete yet, and why"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_90_day_evaluation_q3_early_progress_contributions_criterion_1",
+          "requirement": "Lists one or more early results, accomplishments, completed deliverables, improvements, or meaningful contributions",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "early_progress"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q3_early_progress_contributions_criterion_2",
+          "requirement": "Describes each early result, accomplishment, completed deliverable, improvement, or contribution in detail",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "early_progress"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q3_early_progress_contributions_criterion_3",
+          "requirement": "Explains why each early result, accomplishment, completed deliverable, improvement, or contribution mattered to the team, customer, organization, or role",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "early_progress"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q3_early_progress_contributions_criterion_4",
+          "requirement": "Connects each early result, accomplishment, completed deliverable, improvement, or contribution to one or more responsibilities, priorities, or expectations",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "early_progress"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q3_early_progress_contributions_criterion_5",
+          "requirement": "Cites measurable results, deadlines met, customer outcomes, stakeholder feedback, completed tasks, or other evidence of progress",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "early_progress"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q3_early_progress_contributions_criterion_6",
+          "requirement": "Provides examples of actions personally taken that contributed to the progress or outcome",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "early_progress"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q3_early_progress_contributions_criterion_7",
+          "requirement": "Highlights which results were achieved independently versus with close guidance, training, review, or team support",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "early_progress"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q3_early_progress_contributions_criterion_8",
+          "requirement": "Notes any early goals, deliverables, or expected outcomes that have not yet been completed and explains why",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "early_progress"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "early_progress"
+    },
+    {
+      "id": "performance_review_90_day_evaluation_q4_execution_ownership_follow_through",
+      "discussionArea": "Execution, Ownership & Follow-Through",
+      "question": "How have you followed through on commitments, managed priorities, and taken ownership of your work so far?",
+      "answerGuidance": [
+        "How reliably you followed through on commitments, deadlines, and responsibilities",
+        "Examples of ownership, accountability, prioritization, initiative, or proactive problem solving",
+        "Where execution has been consistent, improving, uneven, or constrained",
+        "Any missed, delayed, reprioritized, or escalated work and why it happened",
+        "How much direction, oversight, approval, training, or support was needed",
+        "How your execution affected work progress, manager confidence, customers, or the team"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_90_day_evaluation_q4_execution_ownership_follow_through_criterion_1",
+          "requirement": "Describes how the employee has followed through on commitments, deadlines, deliverables, or responsibilities so far",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q4_execution_ownership_follow_through_criterion_2",
+          "requirement": "Identifies one or more examples that demonstrate ownership, accountability, prioritization, initiative, or reliability",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q4_execution_ownership_follow_through_criterion_3",
+          "requirement": "Explains how those examples affected work progress, manager confidence, team outcomes, customer outcomes, or learning speed",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q4_execution_ownership_follow_through_criterion_4",
+          "requirement": "States whether execution and ownership have been consistent, uneven, improving, or constrained during the early review period",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q4_execution_ownership_follow_through_criterion_5",
+          "requirement": "Identifies commitments, deadlines, deliverables, responsibilities, or priorities that were missed, delayed, reprioritized, or escalated",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q4_execution_ownership_follow_through_criterion_6",
+          "requirement": "Explains why missed, delayed, reprioritized, or escalated work occurred",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q4_execution_ownership_follow_through_criterion_7",
+          "requirement": "Provides examples of proactively identifying risks, asking clarifying questions, solving problems, or escalating issues early",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q4_execution_ownership_follow_through_criterion_8",
+          "requirement": "Distinguishes work the employee owned independently from work that required manager direction, approval, training, or cross-functional dependency",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "execution_ownership"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "execution_ownership"
+    },
+    {
+      "id": "performance_review_90_day_evaluation_q5_work_quality_learning_curve",
+      "discussionArea": "Work Quality & Learning Curve",
+      "question": "How would you describe the quality, accuracy, and completeness of your work so far, especially considering what you are still learning?",
+      "answerGuidance": [
+        "The quality, accuracy, completeness, thoroughness, and professionalism of your work so far",
+        "Examples of deliverables, tasks, or work products that show your current quality standard",
+        "How your quality compares to what you believe is expected at this stage of ramp-up",
+        "Whether quality has been consistent, improving, uneven, or constrained",
+        "Any errors, missed details, rework, quality issues, or preventable problems and what caused them",
+        "Training, tools, review processes, guidance, time, or learning curve factors that affected quality"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_90_day_evaluation_q5_work_quality_learning_curve_criterion_1",
+          "requirement": "Describes the quality, accuracy, completeness, thoroughness, or professionalism of the employee's work so far",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "work_quality"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q5_work_quality_learning_curve_criterion_2",
+          "requirement": "Identifies one or more examples of work quality, craft, technical skill, accuracy, thoroughness, or attention to detail",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "work_quality"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q5_work_quality_learning_curve_criterion_3",
+          "requirement": "Explains how each example met, exceeded, or fell short of the quality standard expected at this stage of ramp-up",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "work_quality"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q5_work_quality_learning_curve_criterion_4",
+          "requirement": "States whether work quality has been consistent, uneven, improving, or constrained during the early review period",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "work_quality"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q5_work_quality_learning_curve_criterion_5",
+          "requirement": "Cites evidence such as rework levels, errors, review feedback, stakeholder feedback, deliverable acceptance, or quality checks",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "work_quality"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q5_work_quality_learning_curve_criterion_6",
+          "requirement": "Identifies any errors, missed details, rework, quality issues, or preventable problems that occurred",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "work_quality"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q5_work_quality_learning_curve_criterion_7",
+          "requirement": "Explains the causes of any errors, missed details, rework, quality issues, or preventable problems",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "work_quality"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q5_work_quality_learning_curve_criterion_8",
+          "requirement": "Notes how training, tools, review processes, time constraints, manager guidance, or learning curve affected work quality",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "work_quality"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "work_quality"
+    },
+    {
+      "id": "performance_review_90_day_evaluation_q6_communication_feedback_working_relationships",
+      "discussionArea": "Communication, Feedback & Working Relationships",
+      "question": "How are communication, feedback, and collaboration working between you, your manager, and others you work with?",
+      "answerGuidance": [
+        "How you communicate with your manager during the early review period",
+        "How you communicate and collaborate with peers, customers, contractors, or stakeholders",
+        "How feedback, coaching, updates, meetings, handoffs, and escalations typically work",
+        "Communication, collaboration, or feedback practices that help you perform or learn",
+        "Communication, collaboration, or feedback issues that create friction, delay, confusion, or missed expectations",
+        "Examples and causes of communication successes or breakdowns",
+        "Improvements that would support stronger collaboration or feedback next period"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_90_day_evaluation_q6_communication_feedback_working_relationships_criterion_1",
+          "requirement": "Describes typical communication with the manager, including clarity, frequency, responsiveness, transparency, tone, preparedness, or follow-through",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "communication_feedback"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q6_communication_feedback_working_relationships_criterion_2",
+          "requirement": "Describes communication or collaboration with peers, customers, contractors, stakeholders, or cross-functional partners",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "communication_feedback"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q6_communication_feedback_working_relationships_criterion_3",
+          "requirement": "Explains how feedback, coaching, work coordination, updates, meetings, handoffs, or escalation typically happen",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "communication_feedback"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q6_communication_feedback_working_relationships_criterion_4",
+          "requirement": "Identifies communication, collaboration, feedback, or professionalism practices that supported early performance or learning",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "communication_feedback"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q6_communication_feedback_working_relationships_criterion_5",
+          "requirement": "Identifies communication, collaboration, feedback, or professionalism practices that caused or contributed to friction, delay, confusion, missed expectations, or negative outcomes",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "communication_feedback"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q6_communication_feedback_working_relationships_criterion_6",
+          "requirement": "Provides one or more examples of how communication, collaboration, or feedback positively affected performance, learning, or work outcomes",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "communication_feedback"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q6_communication_feedback_working_relationships_criterion_7",
+          "requirement": "Provides one or more examples of how communication, collaboration, or feedback negatively affected performance, learning, or work outcomes",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "communication_feedback"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q6_communication_feedback_working_relationships_criterion_8",
+          "requirement": "Explains the causes of one or more communication, collaboration, feedback, or professionalism breakdowns",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "communication_feedback"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q6_communication_feedback_working_relationships_criterion_9",
+          "requirement": "Suggests one or more communication, feedback, or coordination improvements for the next period",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "communication_feedback"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "communication_feedback"
+    },
+    {
+      "id": "performance_review_90_day_evaluation_q7_challenges_constraints_support_needs",
+      "discussionArea": "Challenges, Constraints & Support Needs",
+      "question": "What challenges, constraints, or resource needs are affecting your ability to succeed in the role?",
+      "answerGuidance": [
+        "Challenges, constraints, obstacles, resource needs, support needs, or fairness considerations affecting success",
+        "Workload, staffing, tools, systems, access, training, documentation, process, timing, or dependency issues",
+        "How those factors affect results, execution, quality, communication, learning, or confidence",
+        "Which constraints you can address directly versus which require manager, team, or organizational support",
+        "Whether expectations should be interpreted differently because of onboarding, role clarity, workload, or resource conditions",
+        "Specific support, resources, clarification, training, or process changes that would help most"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_90_day_evaluation_q7_challenges_constraints_support_needs_criterion_1",
+          "requirement": "Lists one or more challenges, constraints, obstacles, resource needs, support needs, or fairness considerations affecting early success",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "challenges_support"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q7_challenges_constraints_support_needs_criterion_2",
+          "requirement": "Describes each challenge, constraint, obstacle, resource need, support need, or fairness consideration clearly and concretely",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "challenges_support"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q7_challenges_constraints_support_needs_criterion_3",
+          "requirement": "Explains how each challenge, constraint, obstacle, resource need, support need, or fairness consideration affects results, execution, quality, communication, learning, or confidence",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "challenges_support"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q7_challenges_constraints_support_needs_criterion_4",
+          "requirement": "Identifies which challenges, constraints, obstacles, or support needs are highest priority to address",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "challenges_support"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q7_challenges_constraints_support_needs_criterion_5",
+          "requirement": "Provides examples of workload, staffing, tools, systems, access, training, documentation, process, timing, or cross-functional dependencies affecting performance",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "challenges_support"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q7_challenges_constraints_support_needs_criterion_6",
+          "requirement": "Distinguishes constraints the employee can address directly from constraints requiring manager, team, organizational, or system support",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "challenges_support"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q7_challenges_constraints_support_needs_criterion_7",
+          "requirement": "Explains whether expectations or evaluation should be interpreted differently because of onboarding, training, role clarity, workload, or resource conditions",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "challenges_support"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q7_challenges_constraints_support_needs_criterion_8",
+          "requirement": "Suggests concrete support, resources, clarification, training, process changes, or prioritization changes that would improve early success",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "challenges_support"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "challenges_support"
+    },
+    {
+      "id": "performance_review_90_day_evaluation_q8_growth_adjustment_next_period_priorities",
+      "discussionArea": "Growth, Adjustment & Next-Period Priorities",
+      "question": "What have you learned about how to succeed in this role, and what should your priorities be for the next period?",
+      "answerGuidance": [
+        "What you have learned about succeeding in the role",
+        "How you have adapted to expectations, feedback, work habits, or decision-making needs",
+        "Examples of applying feedback, improving independence, or adjusting how you work",
+        "Priorities, goals, development areas, or success measures for the next period",
+        "Which priorities should come first, and why",
+        "Support, coaching, training, feedback, access, or resources needed to make progress"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_90_day_evaluation_q8_growth_adjustment_next_period_priorities_criterion_1",
+          "requirement": "Identifies one or more lessons learned about how to succeed in the role",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "growth_next_period"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q8_growth_adjustment_next_period_priorities_criterion_2",
+          "requirement": "Describes each lesson learned in concrete, understandable terms",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "growth_next_period"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q8_growth_adjustment_next_period_priorities_criterion_3",
+          "requirement": "Explains how those lessons affect future performance, role effectiveness, judgment, learning, or readiness",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "growth_next_period"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q8_growth_adjustment_next_period_priorities_criterion_4",
+          "requirement": "Lists one or more priorities, goals, development areas, or success measures for the next period",
+          "required": true,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "growth_next_period"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q8_growth_adjustment_next_period_priorities_criterion_5",
+          "requirement": "Provides examples of applying feedback, adapting to the role, making better decisions, building independence, or improving work habits",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "growth_next_period"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q8_growth_adjustment_next_period_priorities_criterion_6",
+          "requirement": "Describes each next-period priority, goal, development area, or success measure in concrete, understandable terms",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "growth_next_period"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q8_growth_adjustment_next_period_priorities_criterion_7",
+          "requirement": "Explains why certain priorities, goals, or development areas should be addressed before others",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "growth_next_period"
+          ]
+        },
+        {
+          "id": "performance_review_90_day_evaluation_q8_growth_adjustment_next_period_priorities_criterion_8",
+          "requirement": "Identifies support, coaching, training, feedback, access, or resources needed to make progress on next-period priorities",
+          "required": false,
+          "label": "Performance Review 90 Day Evaluation",
+          "termIds": [
+            "growth_next_period"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "growth_next_period"
+    }
+  ]
+}

@@ -1,0 +1,843 @@
+{
+  "schemaVersion": 2,
+  "topicId": "performance_review_focused_improvement",
+  "caseType": "Performance Review - Focused Improvement",
+  "description": "High-quality answer criteria for the Performance Review - Focused Improvement Getting Started interview. Employee self-evaluation in preparation for a review focused on specific performance concerns and needed improvement.",
+  "workflow": {
+    "actors": [
+      "requestor",
+      "participant"
+    ],
+    "factStatementLabel": "Confident Fact",
+    "postProcessingTimeoutMs": 600000
+  },
+  "terms": [
+    {
+      "id": "role_expectations",
+      "label": "Role Expectations & Performance Standards",
+      "description": "Responsibilities, expectations, or performance standards most important to clarify for the role right now."
+    },
+    {
+      "id": "performance_concerns",
+      "label": "Specific Performance Concerns",
+      "description": "The specific performance concerns identified as needing improvement and how the employee understands them."
+    },
+    {
+      "id": "evidence_impact",
+      "label": "Evidence, Examples & Impact",
+      "description": "Examples, feedback, outcomes, and evidence explaining the concerns and their impact."
+    },
+    {
+      "id": "causes_context",
+      "label": "Causes, Context & Contributing Factors",
+      "description": "Factors contributing to the performance concerns and their locus of control."
+    },
+    {
+      "id": "actions_taken",
+      "label": "Actions Already Taken",
+      "description": "Steps already taken to address the concerns and what changed as a result."
+    },
+    {
+      "id": "support_needed",
+      "label": "Support, Resources & Clarification Needed",
+      "description": "Support, resources, clarification, coaching, or changes that would help meet expectations."
+    },
+    {
+      "id": "improvement_plan",
+      "label": "Improvement Plan & Timeline",
+      "description": "Specific improvements to make next and a realistic timeline for showing progress."
+    },
+    {
+      "id": "commitment_followup",
+      "label": "Commitment, Risks & Follow-Up",
+      "description": "Commitments, risks that could interfere with improvement, and how progress should be reviewed."
+    }
+  ],
+  "ratingScale": [
+    {
+      "id": "unsatisfactory",
+      "label": "Unsatisfactory",
+      "score": 0,
+      "responseProfile": {
+        "stance": "Performance consistently falls materially short of expectations.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "needs_improvement",
+      "label": "Needs Improvement",
+      "score": 1,
+      "responseProfile": {
+        "stance": "Performance has meaningful gaps and requires focused improvement.",
+        "evidenceStrength": "moderate",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "meets_expectations",
+      "label": "Meets Expectations",
+      "score": 2,
+      "responseProfile": {
+        "stance": "Performance reliably fulfills the expectations of the role.",
+        "evidenceStrength": "moderate",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "exceeds_expectations",
+      "label": "Exceeds Expectations",
+      "score": 3,
+      "responseProfile": {
+        "stance": "Performance frequently surpasses normal expectations.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "outstanding",
+      "label": "Outstanding",
+      "score": 4,
+      "responseProfile": {
+        "stance": "Performance significantly and consistently surpasses expectations.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    }
+  ],
+  "primaryQuestions": [
+    {
+      "id": "performance_review_focused_improvement_q1_role_expectations_performance_standards",
+      "discussionArea": "Role Expectations & Performance Standards",
+      "question": "What responsibilities, expectations, or performance standards are most important to clarify for your role right now?",
+      "answerGuidance": [
+        "Your current role/title or functional position",
+        "The responsibilities, expectations, or performance standards that need the most clarification",
+        "Which responsibilities are core to your role versus temporary, expanded, or informal work",
+        "Where role scope, ownership, decision rights, or success standards feel unclear or disputed",
+        "How lack of clarity affects performance or improvement planning",
+        "Any expectations that have changed, intensified, or become more important recently"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_focused_improvement_q1_role_expectations_performance_standards_criterion_1",
+          "requirement": "States current role/title or functional position",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "role_expectations"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q1_role_expectations_performance_standards_criterion_2",
+          "requirement": "Lists one or more responsibilities, expectations, or performance standards that need clarification right now",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "role_expectations"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q1_role_expectations_performance_standards_criterion_3",
+          "requirement": "Describes each responsibility, expectation, or performance standard in concrete, understandable terms",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "role_expectations"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q1_role_expectations_performance_standards_criterion_4",
+          "requirement": "Explains why each responsibility, expectation, or performance standard matters to current performance improvement",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "role_expectations"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q1_role_expectations_performance_standards_criterion_5",
+          "requirement": "Distinguishes responsibilities that are core to the role from temporary assignments, expanded scope, or informal requests",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "role_expectations"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q1_role_expectations_performance_standards_criterion_6",
+          "requirement": "Identifies any areas where role scope, ownership, decision rights, or success standards are unclear or disputed",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "role_expectations"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q1_role_expectations_performance_standards_criterion_7",
+          "requirement": "Explains how unclear role scope, ownership, decision rights, or success standards affect performance or improvement planning",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "role_expectations"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q1_role_expectations_performance_standards_criterion_8",
+          "requirement": "Notes any expectations that have changed, intensified, or become more important recently",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "role_expectations"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "role_expectations"
+    },
+    {
+      "id": "performance_review_focused_improvement_q2_specific_performance_concerns",
+      "discussionArea": "Specific Performance Concerns",
+      "question": "What specific areas of your performance have been identified as needing improvement, and how do you understand those concerns?",
+      "answerGuidance": [
+        "The specific performance concerns, gaps, behaviors, deliverables, or outcomes that have been identified",
+        "How you understand each concern and why it is being raised",
+        "How each concern connects to role responsibilities, expectations, standards, goals, or business needs",
+        "Which concerns you agree with, do not fully understand, or see differently",
+        "Whether each concern involves results, execution, quality, communication, judgment, growth, or something else",
+        "Any concerns that need clearer examples, evidence, standards, or expectations"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_focused_improvement_q2_specific_performance_concerns_criterion_1",
+          "requirement": "Lists one or more specific performance concerns, gaps, behaviors, deliverables, or outcomes that have been identified as needing improvement",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "performance_concerns"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q2_specific_performance_concerns_criterion_2",
+          "requirement": "Describes each performance concern, gap, behavior, deliverable, or outcome in concrete, understandable terms",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "performance_concerns"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q2_specific_performance_concerns_criterion_3",
+          "requirement": "Explains how the employee understands each concern and why it is being raised",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "performance_concerns"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q2_specific_performance_concerns_criterion_4",
+          "requirement": "Connects each concern to one or more role responsibilities, expectations, standards, goals, or business needs",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "performance_concerns"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q2_specific_performance_concerns_criterion_5",
+          "requirement": "Distinguishes concerns the employee agrees with from concerns the employee does not fully understand or agree with",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "performance_concerns"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q2_specific_performance_concerns_criterion_6",
+          "requirement": "Identifies whether each concern is about results, execution, quality, communication, judgment, growth, or another performance dimension",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "performance_concerns"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q2_specific_performance_concerns_criterion_7",
+          "requirement": "Notes whether the concern is recurring, recent, isolated, worsening, improving, or unclear",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "performance_concerns"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q2_specific_performance_concerns_criterion_8",
+          "requirement": "Identifies any concern that needs clearer examples, evidence, standards, or expectations before improvement can be planned",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "performance_concerns"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "performance_concerns"
+    },
+    {
+      "id": "performance_review_focused_improvement_q3_evidence_examples_impact",
+      "discussionArea": "Evidence, Examples & Impact",
+      "question": "What examples, feedback, outcomes, or evidence help explain the performance concerns and their impact?",
+      "answerGuidance": [
+        "Examples, feedback, outcomes, events, or evidence related to the concerns",
+        "What specifically happened, when it happened, and who or what was affected",
+        "How the examples connect to the concern being raised",
+        "The impact on work quality, timeliness, team outcomes, customer outcomes, manager confidence, or business results",
+        "Measurable evidence such as dates, deadlines, error rates, rework, feedback, or factual anchors",
+        "Which parts are observable facts versus interpretations, assumptions, opinions, or general impressions",
+        "Any missing evidence needed to understand the concern more accurately"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_focused_improvement_q3_evidence_examples_impact_criterion_1",
+          "requirement": "Lists one or more examples, feedback points, outcomes, events, or evidence related to the performance concerns",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "evidence_impact"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q3_evidence_examples_impact_criterion_2",
+          "requirement": "Describes each example, feedback point, outcome, event, or evidence item in detail",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "evidence_impact"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q3_evidence_examples_impact_criterion_3",
+          "requirement": "Explains how each example, feedback point, outcome, event, or evidence item relates to the performance concern",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "evidence_impact"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q3_evidence_examples_impact_criterion_4",
+          "requirement": "Explains the impact of the concern on work quality, timeliness, team outcomes, customer outcomes, manager confidence, or business results",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "evidence_impact"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q3_evidence_examples_impact_criterion_5",
+          "requirement": "Cites measurable evidence, dates, deadlines, error rates, rework, customer feedback, stakeholder feedback, or other factual anchors",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "evidence_impact"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q3_evidence_examples_impact_criterion_6",
+          "requirement": "Distinguishes observable facts from interpretations, assumptions, opinions, or general impressions",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "evidence_impact"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q3_evidence_examples_impact_criterion_7",
+          "requirement": "Provides examples that show whether the concern is improving, unchanged, worsening, or inconsistent over time",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "evidence_impact"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q3_evidence_examples_impact_criterion_8",
+          "requirement": "Identifies any missing or incomplete evidence needed to understand the concern more accurately",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "evidence_impact"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "evidence_impact"
+    },
+    {
+      "id": "performance_review_focused_improvement_q4_causes_context_contributing_factors",
+      "discussionArea": "Causes, Context & Contributing Factors",
+      "question": "What factors do you believe are contributing to the performance concerns?",
+      "answerGuidance": [
+        "Causes, context, constraints, obstacles, or contributing factors behind the performance concerns",
+        "Workload, time, staffing, tools, training, process, access, communication, feedback, role clarity, or dependency factors",
+        "How each factor affects performance or the ability to improve",
+        "Which factors are within your control versus shared, manager, team, organizational, or external control",
+        "Root causes versus symptoms, consequences, or secondary issues",
+        "Whether context, constraints, resources, or fairness considerations should affect how the concern is interpreted",
+        "Which factors should be addressed first, and why"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_focused_improvement_q4_causes_context_contributing_factors_criterion_1",
+          "requirement": "Lists one or more causes, contextual factors, constraints, obstacles, or contributing factors related to the performance concerns",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "causes_context"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q4_causes_context_contributing_factors_criterion_2",
+          "requirement": "Describes each cause, contextual factor, constraint, obstacle, or contributing factor in concrete, understandable terms",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "causes_context"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q4_causes_context_contributing_factors_criterion_3",
+          "requirement": "Explains how each factor contributes to the performance concern or affects the employee's ability to improve",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "causes_context"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q4_causes_context_contributing_factors_criterion_4",
+          "requirement": "States whether each factor is primarily within the employee's control, shared control, manager control, team control, organizational control, or external control",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "causes_context"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q4_causes_context_contributing_factors_criterion_5",
+          "requirement": "Identifies workload, time, staffing, tools, training, process, access, communication, feedback, role clarity, or dependency factors",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "causes_context"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q4_causes_context_contributing_factors_criterion_6",
+          "requirement": "Distinguishes root causes from symptoms, consequences, or secondary issues",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "causes_context"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q4_causes_context_contributing_factors_criterion_7",
+          "requirement": "Explains whether the concern should be interpreted differently because of context, constraints, resource levels, or fairness considerations",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "causes_context"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q4_causes_context_contributing_factors_criterion_8",
+          "requirement": "Identifies which contributing factors are highest priority to address first and explains why",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "causes_context"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "causes_context"
+    },
+    {
+      "id": "performance_review_focused_improvement_q5_actions_already_taken",
+      "discussionArea": "Actions Already Taken",
+      "question": "What steps have you already taken to address the performance concerns, and what has changed as a result?",
+      "answerGuidance": [
+        "Steps you have already taken to address the performance concerns",
+        "Why you took each action and which concern it was meant to address",
+        "Examples of responding to feedback, asking for clarification, changing work habits, improving quality, improving communication, or managing priorities differently",
+        "What improved, changed, stayed the same, or became clearer as a result",
+        "Evidence of progress, such as better results, fewer errors, faster turnaround, better feedback, completed tasks, or reduced rework",
+        "Actions that did not work as expected, and why",
+        "Where additional support, feedback, coaching, resources, or time was needed"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_focused_improvement_q5_actions_already_taken_criterion_1",
+          "requirement": "Lists one or more actions, changes, efforts, decisions, or adjustments already taken to address the performance concerns",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "actions_taken"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q5_actions_already_taken_criterion_2",
+          "requirement": "Describes each action, change, effort, decision, or adjustment in concrete, understandable terms",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "actions_taken"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q5_actions_already_taken_criterion_3",
+          "requirement": "Explains why each action was taken and which performance concern it was intended to address",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "actions_taken"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q5_actions_already_taken_criterion_4",
+          "requirement": "States what changed, improved, stayed the same, or became clearer as a result of the actions taken",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "actions_taken"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q5_actions_already_taken_criterion_5",
+          "requirement": "Provides examples of responding to feedback, asking for clarification, changing work habits, improving quality, improving communication, or managing priorities differently",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "actions_taken"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q5_actions_already_taken_criterion_6",
+          "requirement": "Cites evidence of progress, such as improved results, fewer errors, faster turnaround, better feedback, completed tasks, or reduced rework",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "actions_taken"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q5_actions_already_taken_criterion_7",
+          "requirement": "Identifies actions that did not work as expected and explains why",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "actions_taken"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q5_actions_already_taken_criterion_8",
+          "requirement": "Notes where additional support, feedback, coaching, resources, or time was needed for the action to succeed",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "actions_taken"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "actions_taken"
+    },
+    {
+      "id": "performance_review_focused_improvement_q6_support_resources_clarification_needed",
+      "discussionArea": "Support, Resources & Clarification Needed",
+      "question": "What support, resources, clarification, coaching, or changes would help you meet expectations?",
+      "answerGuidance": [
+        "Support, resources, clarification, coaching, feedback, training, or process changes that would help you meet expectations",
+        "How each need would improve performance or make improvement more realistic",
+        "Which needs require manager action, employee action, team action, organizational action, or system/process action",
+        "Examples such as coaching, feedback cadence, expectation clarification, tools, documentation, training, staffing, workload adjustment, or process change",
+        "Which needs are highest priority and why",
+        "Which needs are short-term versus longer-term supports",
+        "How the manager or organization could tell whether the support is helping"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_focused_improvement_q6_support_resources_clarification_needed_criterion_1",
+          "requirement": "Lists one or more support needs, resource needs, clarification needs, coaching needs, feedback needs, training needs, or process changes that would help the employee meet expectations",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "support_needed"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q6_support_resources_clarification_needed_criterion_2",
+          "requirement": "Describes each support need, resource need, clarification need, coaching need, feedback need, training need, or process change in concrete, understandable terms",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "support_needed"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q6_support_resources_clarification_needed_criterion_3",
+          "requirement": "Explains how meeting each need would help the employee improve performance or meet expectations",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "support_needed"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q6_support_resources_clarification_needed_criterion_4",
+          "requirement": "Identifies which support, resource, clarification, coaching, feedback, training, or process needs are highest priority",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "support_needed"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q6_support_resources_clarification_needed_criterion_5",
+          "requirement": "Distinguishes needs requiring manager action from needs requiring employee action, team action, organizational action, or system/process action",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "support_needed"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q6_support_resources_clarification_needed_criterion_6",
+          "requirement": "Provides examples of coaching, feedback cadence, expectation clarification, tools, documentation, training, staffing, workload adjustment, or process change needed",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "support_needed"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q6_support_resources_clarification_needed_criterion_7",
+          "requirement": "Explains which needs are short-term versus longer-term improvement supports",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "support_needed"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q6_support_resources_clarification_needed_criterion_8",
+          "requirement": "Suggests how the manager or organization could tell whether the support is helping",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "support_needed"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "support_needed"
+    },
+    {
+      "id": "performance_review_focused_improvement_q7_improvement_plan_timeline",
+      "discussionArea": "Improvement Plan & Timeline",
+      "question": "What specific improvements should happen next, and what timeline would be realistic for showing progress?",
+      "answerGuidance": [
+        "The specific improvements, actions, goals, behaviors, deliverables, or success measures that should happen next",
+        "How each improvement connects to the performance concerns",
+        "Which improvements should happen first, and why",
+        "A realistic timeline, milestone, cadence, or review point for showing progress",
+        "Measurable indicators, observable behaviors, deadlines, quality standards, or feedback signals that would show progress",
+        "Why the timeline is realistic given workload, resources, training, role clarity, or dependencies",
+        "What should happen if progress is faster, slower, or blocked by constraints"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_focused_improvement_q7_improvement_plan_timeline_criterion_1",
+          "requirement": "Lists one or more specific improvements, actions, goals, behaviors, deliverables, or success measures that should happen next",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "improvement_plan"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q7_improvement_plan_timeline_criterion_2",
+          "requirement": "Describes each improvement, action, goal, behavior, deliverable, or success measure in concrete, understandable terms",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "improvement_plan"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q7_improvement_plan_timeline_criterion_3",
+          "requirement": "Explains how each improvement, action, goal, behavior, deliverable, or success measure connects to the performance concerns",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "improvement_plan"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q7_improvement_plan_timeline_criterion_4",
+          "requirement": "States a realistic timeline, milestone, cadence, or review point for showing progress on each improvement area",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "improvement_plan"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q7_improvement_plan_timeline_criterion_5",
+          "requirement": "Prioritizes which improvements should happen first and explains why",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "improvement_plan"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q7_improvement_plan_timeline_criterion_6",
+          "requirement": "Cites measurable indicators, observable behaviors, deadlines, quality standards, or feedback signals that would show progress",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "improvement_plan"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q7_improvement_plan_timeline_criterion_7",
+          "requirement": "Explains why the proposed timeline is realistic given workload, resources, training, role clarity, or dependencies",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "improvement_plan"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q7_improvement_plan_timeline_criterion_8",
+          "requirement": "Identifies what should happen if progress is faster than expected, slower than expected, or blocked by constraints",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "improvement_plan"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "improvement_plan"
+    },
+    {
+      "id": "performance_review_focused_improvement_q8_commitment_risks_follow_up",
+      "discussionArea": "Commitment, Risks & Follow-Up",
+      "question": "What commitments are you prepared to make, what risks could interfere with improvement, and how should progress be reviewed?",
+      "answerGuidance": [
+        "The commitments you are prepared to make to improve performance",
+        "How each commitment will be visible, observable, or measurable",
+        "Why each commitment is realistic and meaningful",
+        "Risks, barriers, constraints, or unresolved issues that could interfere with improvement",
+        "Ways to reduce, monitor, or escalate risks that could block progress",
+        "How progress should be reviewed, including follow-up cadence, feedback approach, evidence, milestones, or success measures",
+        "What information should be shared during follow-up conversations so progress can be reviewed fairly and accurately"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "performance_review_focused_improvement_q8_commitment_risks_follow_up_criterion_1",
+          "requirement": "States one or more commitments the employee is prepared to make to improve performance",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "commitment_followup"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q8_commitment_risks_follow_up_criterion_2",
+          "requirement": "Describes each commitment in concrete, observable, and understandable terms",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "commitment_followup"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q8_commitment_risks_follow_up_criterion_3",
+          "requirement": "Identifies one or more risks, barriers, constraints, or unresolved issues that could interfere with improvement",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "commitment_followup"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q8_commitment_risks_follow_up_criterion_4",
+          "requirement": "Describes how progress should be reviewed, including follow-up cadence, feedback approach, evidence, milestones, or success measures",
+          "required": true,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "commitment_followup"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q8_commitment_risks_follow_up_criterion_5",
+          "requirement": "Explains why the employee believes each commitment is realistic and meaningful",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "commitment_followup"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q8_commitment_risks_follow_up_criterion_6",
+          "requirement": "Explains how each risk, barrier, constraint, or unresolved issue could affect improvement",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "commitment_followup"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q8_commitment_risks_follow_up_criterion_7",
+          "requirement": "Suggests ways to reduce, monitor, or escalate risks that could interfere with improvement",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "commitment_followup"
+          ]
+        },
+        {
+          "id": "performance_review_focused_improvement_q8_commitment_risks_follow_up_criterion_8",
+          "requirement": "Identifies what information should be shared during follow-up conversations so progress can be reviewed fairly and accurately",
+          "required": false,
+          "label": "Performance Review Focused Improvement",
+          "termIds": [
+            "commitment_followup"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "commitment_followup"
+    }
+  ]
+}

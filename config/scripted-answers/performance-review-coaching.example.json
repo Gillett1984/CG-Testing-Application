@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "topicId": "performance_review_coaching",
+  "name": "Performance Review - Coaching scripted answers (example)",
+  "description": "SYNTHETIC TEST DATA. First response per primary question. employee = requestor voice (first person); manager = participant voice (third person about the employee). Either side may be omitted to fall back to the LLM responder.",
+  "answers": [
+    {
+      "primaryQuestionId": "performance_review_coaching_q1_current_role_focus_priorities",
+      "employee": "SYNTHETIC TEST DATA. I'm a Data Synthesis Analyst, and most of my time goes to building the cross-department dashboards and maintaining the toolkit that automates our reporting. Right now my main priorities are the quarterly reporting cycle and a short-term migration project.",
+      "manager": "SYNTHETIC TEST DATA. The employee is a Data Synthesis Analyst whose core responsibility is the cross-department dashboards and the reporting toolkit. Most of their time currently goes to the quarterly reporting cycle and a short-term migration project."
+    },
+    {
+      "primaryQuestionId": "performance_review_coaching_q2_progress_since_last_check_in",
+      "employee": "SYNTHETIC TEST DATA. Since the last check-in I'm most proud of cutting dashboard prep time by about 40% by automating the manual merge steps. Pairing with the product team early is what made it work.",
+      "manager": "SYNTHETIC TEST DATA. Since the last check-in the employee reduced dashboard prep time by roughly 40% by automating manual merge steps, though accuracy occasionally dipped below target during the transition."
+    },
+    {
+      "primaryQuestionId": "performance_review_coaching_q3_current_challenges_obstacles",
+      "employee": "SYNTHETIC TEST DATA. What makes my work harder is unclear ownership on ad hoc data requests, which pulls me off planned work and delays the dashboards.",
+      "manager": "SYNTHETIC TEST DATA. The employee's main obstacle is unclear ownership of ad hoc requests, which diverts them from planned work and has contributed to a few missed handoffs."
+    },
+    {
+      "primaryQuestionId": "performance_review_coaching_q4_support_needed",
+      "employee": "SYNTHETIC TEST DATA. I'd perform better with clearer prioritization of incoming requests and a defined intake process so I'm not context-switching constantly.",
+      "manager": "SYNTHETIC TEST DATA. The employee would benefit most from a defined request-intake process and clearer prioritization so they can protect focus time for planned deliverables."
+    },
+    {
+      "primaryQuestionId": "performance_review_coaching_q5_communication_working_relationship",
+      "employee": "SYNTHETIC TEST DATA. Communication with my manager is generally good, but updates to stakeholders are sometimes delayed when I'm heads-down, which causes occasional misalignment.",
+      "manager": "SYNTHETIC TEST DATA. Communication with the employee is responsive overall, but their stakeholder updates are sometimes delayed under load, which has caused occasional misalignment on priorities."
+    },
+    {
+      "primaryQuestionId": "performance_review_coaching_q6_growth_development",
+      "employee": "SYNTHETIC TEST DATA. I'd like to grow into more data-architecture and mentoring work, and some dedicated time plus a senior pairing partner would help me get there.",
+      "manager": "SYNTHETIC TEST DATA. The employee is well-positioned to grow into data-architecture and mentoring responsibilities; protected development time and a senior pairing partner would help them get there."
+    },
+    {
+      "primaryQuestionId": "performance_review_coaching_q7_next_period_priorities",
+      "employee": "SYNTHETIC TEST DATA. Next period my top priorities should be the reporting migration and a reliable intake process, measured by on-time delivery and dashboard accuracy.",
+      "manager": "SYNTHETIC TEST DATA. For the next period the employee's top priorities should be completing the reporting migration and establishing a dependable intake process, measured by on-time delivery and dashboard accuracy."
+    }
+  ]
+}

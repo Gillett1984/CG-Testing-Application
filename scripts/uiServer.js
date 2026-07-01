@@ -43,6 +43,10 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, await loadScenarioData(url.searchParams.get('caseType')));
     }
 
+    if (request.method === 'GET' && url.pathname === '/api/scripted-answers') {
+      return sendJson(response, { files: await listScriptedAnswerFiles() });
+    }
+
     if (request.method === 'GET' && url.pathname === '/api/topic-drafts') {
       return sendJson(response, { drafts: await listTopicDrafts(rootDir) });
     }
@@ -123,6 +127,32 @@ async function listCaseTypes() {
     });
   }
   return caseTypes.sort((a, b) => a.caseType.localeCompare(b.caseType));
+}
+
+async function listScriptedAnswerFiles() {
+  const dir = path.join(rootDir, 'config', 'scripted-answers');
+  if (!fsSync.existsSync(dir)) return [];
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .map((entry) => ({
+      name: entry.name,
+      path: path.posix.join('config', 'scripted-answers', entry.name)
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// Validates a UI-supplied scripted-answers path: must resolve inside
+// config/scripted-answers and exist. Returns '' (disabled) otherwise.
+function sanitizeScriptedAnswersPath(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  const baseDir = path.resolve(rootDir, 'config', 'scripted-answers');
+  const resolved = path.resolve(rootDir, raw);
+  if (!resolved.startsWith(baseDir) || !fsSync.existsSync(resolved)) {
+    throw new Error(`Invalid scripted answers file: ${raw}`);
+  }
+  return path.relative(rootDir, resolved).replaceAll('\\', '/');
 }
 
 async function loadCriteriaForCaseType(caseType) {
@@ -256,7 +286,8 @@ function sanitizeRunConfig(runConfig) {
       : Math.max(1, Number(runConfig.numberOfCases ?? 1)),
     maxTurns: Math.max(1, Number(runConfig.maxTurns ?? 25)),
     stopOnFailure: Boolean(runConfig.stopOnFailure),
-    qualityCriteriaPath: String(runConfig.qualityCriteriaPath ?? criteriaPathForCaseType(runConfig.caseType ?? runConfig.topic))
+    qualityCriteriaPath: String(runConfig.qualityCriteriaPath ?? criteriaPathForCaseType(runConfig.caseType ?? runConfig.topic)),
+    scriptedAnswersPath: sanitizeScriptedAnswersPath(runConfig.scriptedAnswersPath)
   };
 }
 

@@ -1,0 +1,846 @@
+{
+  "schemaVersion": 2,
+  "topicId": "project_review",
+  "caseType": "Project Review",
+  "description": "High-quality answer criteria for the Project Review Getting Started interview. Employee self-evaluation focused on a specific project rather than broad overall performance.",
+  "workflow": {
+    "actors": [
+      "requestor",
+      "participant"
+    ],
+    "factStatementLabel": "Confident Fact",
+    "postProcessingTimeoutMs": 600000
+  },
+  "terms": [
+    {
+      "id": "project_scope",
+      "label": "Project Scope, Role & Responsibilities",
+      "description": "The project, the employee’s role, and the responsibilities or ownership areas assigned."
+    },
+    {
+      "id": "project_goals",
+      "label": "Project Goals, Deliverables & Success Measures",
+      "description": "The most important project goals, deliverables, timelines, or success measures and how clearly they were understood."
+    },
+    {
+      "id": "project_results",
+      "label": "Project Results & Impact",
+      "description": "Results, outcomes, or impact the project produced and the supporting evidence."
+    },
+    {
+      "id": "execution_ownership",
+      "label": "Execution, Ownership & Follow-Through",
+      "description": "How the employee managed project responsibilities, followed through on commitments, and responded to changes or obstacles."
+    },
+    {
+      "id": "work_quality",
+      "label": "Work Quality & Project Craft",
+      "description": "Quality, accuracy, completeness, or professionalism of the project work."
+    },
+    {
+      "id": "communication_stakeholder",
+      "label": "Communication, Collaboration & Stakeholder Coordination",
+      "description": "How communication, collaboration, and stakeholder coordination affected the project."
+    },
+    {
+      "id": "constraints_risks",
+      "label": "Constraints, Risks & Resource Factors",
+      "description": "Constraints, risks, dependencies, or resource issues that affected the project and its outcome."
+    },
+    {
+      "id": "lessons_learned",
+      "label": "Lessons Learned & Future Project Improvements",
+      "description": "What was learned and what should be repeated, changed, or improved for future projects."
+    }
+  ],
+  "ratingScale": [
+    {
+      "id": "unsatisfactory",
+      "label": "Unsatisfactory",
+      "score": 0,
+      "responseProfile": {
+        "stance": "Performance consistently falls materially short of expectations.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "needs_improvement",
+      "label": "Needs Improvement",
+      "score": 1,
+      "responseProfile": {
+        "stance": "Performance has meaningful gaps and requires focused improvement.",
+        "evidenceStrength": "moderate",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "meets_expectations",
+      "label": "Meets Expectations",
+      "score": 2,
+      "responseProfile": {
+        "stance": "Performance reliably fulfills the expectations of the role.",
+        "evidenceStrength": "moderate",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "exceeds_expectations",
+      "label": "Exceeds Expectations",
+      "score": 3,
+      "responseProfile": {
+        "stance": "Performance frequently surpasses normal expectations.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "outstanding",
+      "label": "Outstanding",
+      "score": 4,
+      "responseProfile": {
+        "stance": "Performance significantly and consistently surpasses expectations.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    }
+  ],
+  "primaryQuestions": [
+    {
+      "id": "project_review_q1_project_scope_role_responsibilities",
+      "discussionArea": "Project Scope, Role & Responsibilities",
+      "question": "What was the project, what was your role, and what responsibilities or ownership areas were assigned to you?",
+      "answerGuidance": [
+        "The project name, project type, or project context being reviewed",
+        "Your role/title or functional position during the project",
+        "Your assigned responsibilities, ownership areas, decision rights, or deliverables",
+        "Which responsibilities you personally owned versus shared with others",
+        "Any unclear, changed, or disputed role scope, ownership, or decision rights",
+        "How role or scope clarity affected execution, communication, quality, or results",
+        "Any temporary, expanded, or informal responsibilities that should be considered"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "project_review_q1_project_scope_role_responsibilities_criterion_1",
+          "requirement": "States the project name, project type, or project context being reviewed",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "project_scope"
+          ]
+        },
+        {
+          "id": "project_review_q1_project_scope_role_responsibilities_criterion_2",
+          "requirement": "States current role/title or functional position during the project",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "project_scope"
+          ]
+        },
+        {
+          "id": "project_review_q1_project_scope_role_responsibilities_criterion_3",
+          "requirement": "Lists one or more project responsibilities, ownership areas, decision rights, or assigned deliverables",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "project_scope"
+          ]
+        },
+        {
+          "id": "project_review_q1_project_scope_role_responsibilities_criterion_4",
+          "requirement": "Describes each project responsibility, ownership area, decision right, or assigned deliverable in concrete, understandable terms",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "project_scope"
+          ]
+        },
+        {
+          "id": "project_review_q1_project_scope_role_responsibilities_criterion_5",
+          "requirement": "Distinguishes responsibilities personally owned from responsibilities shared with others or owned by another person, team, or function",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "project_scope"
+          ]
+        },
+        {
+          "id": "project_review_q1_project_scope_role_responsibilities_criterion_6",
+          "requirement": "Identifies any project role, scope, ownership, decision right, or responsibility that was unclear, changed, or disputed",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "project_scope"
+          ]
+        },
+        {
+          "id": "project_review_q1_project_scope_role_responsibilities_criterion_7",
+          "requirement": "Explains how unclear, changed, or disputed project scope affected execution, communication, results, or quality",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "project_scope"
+          ]
+        },
+        {
+          "id": "project_review_q1_project_scope_role_responsibilities_criterion_8",
+          "requirement": "Notes any temporary assignments, expanded responsibilities, or informal expectations that should be considered for the project review",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "project_scope"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "project_scope"
+    },
+    {
+      "id": "project_review_q2_project_goals_deliverables_success_measures",
+      "discussionArea": "Project Goals, Deliverables & Success Measures",
+      "question": "What were the most important project goals, deliverables, timelines, or success measures, and how clearly were they understood?",
+      "answerGuidance": [
+        "The most important project goals, deliverables, milestones, timelines, deadlines, or success measures",
+        "How success was supposed to be measured, accepted, or recognized",
+        "Any measurable targets, acceptance criteria, quality standards, customer outcomes, or stakeholder expectations",
+        "How clearly project expectations were communicated or understood",
+        "Which goals or deliverables were formally assigned versus implied, evolving, or informal",
+        "Any changes to goals, timelines, deliverables, or success measures during the project",
+        "How changes affected expectations, prioritization, quality, or outcomes"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "project_review_q2_project_goals_deliverables_success_measures_criterion_1",
+          "requirement": "Lists one or more project goals, deliverables, milestones, timelines, deadlines, quality standards, or success measures",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "project_goals"
+          ]
+        },
+        {
+          "id": "project_review_q2_project_goals_deliverables_success_measures_criterion_2",
+          "requirement": "Describes each project goal, deliverable, milestone, timeline, deadline, quality standard, or success measure in concrete, understandable terms",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "project_goals"
+          ]
+        },
+        {
+          "id": "project_review_q2_project_goals_deliverables_success_measures_criterion_3",
+          "requirement": "Explains why each listed project goal, deliverable, milestone, timeline, deadline, quality standard, or success measure mattered",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "project_goals"
+          ]
+        },
+        {
+          "id": "project_review_q2_project_goals_deliverables_success_measures_criterion_4",
+          "requirement": "States how clearly the goals, deliverables, timelines, or success measures were communicated or understood",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "project_goals"
+          ]
+        },
+        {
+          "id": "project_review_q2_project_goals_deliverables_success_measures_criterion_5",
+          "requirement": "Cites measurable targets, deadlines, acceptance criteria, quality thresholds, customer outcomes, stakeholder expectations, or other evidence-based success indicators",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "project_goals"
+          ]
+        },
+        {
+          "id": "project_review_q2_project_goals_deliverables_success_measures_criterion_6",
+          "requirement": "Distinguishes goals or deliverables that were formally assigned from goals or deliverables that were implied, evolving, or informally understood",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "project_goals"
+          ]
+        },
+        {
+          "id": "project_review_q2_project_goals_deliverables_success_measures_criterion_7",
+          "requirement": "Identifies any goals, deliverables, timelines, standards, or success measures that changed during the project",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "project_goals"
+          ]
+        },
+        {
+          "id": "project_review_q2_project_goals_deliverables_success_measures_criterion_8",
+          "requirement": "Explains how changes to goals, deliverables, timelines, standards, or success measures affected project expectations or performance",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "project_goals"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "project_goals"
+    },
+    {
+      "id": "project_review_q3_project_results_impact",
+      "discussionArea": "Project Results & Impact",
+      "question": "What results, outcomes, or impact did the project produce, and what evidence best supports your view?",
+      "answerGuidance": [
+        "The most important project results, outcomes, accomplishments, deliverables, improvements, or contributions",
+        "What specifically was achieved, delivered, improved, solved, stabilized, or learned",
+        "Why those results mattered to the team, customer, stakeholder, organization, or project objective",
+        "How outcomes connect to project goals, priorities, responsibilities, or expected outcomes",
+        "Evidence such as metrics, deadlines met, stakeholder feedback, customer outcomes, or operational outcomes",
+        "Actions you personally took that contributed to the outcome",
+        "Results that exceeded, met, or fell short of expectations, and why",
+        "Any constraints, dependencies, resource limits, or scope changes that affected results"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "project_review_q3_project_results_impact_criterion_1",
+          "requirement": "Lists one or more project results, outcomes, accomplishments, deliverables, improvements, or meaningful contributions",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "project_results"
+          ]
+        },
+        {
+          "id": "project_review_q3_project_results_impact_criterion_2",
+          "requirement": "Describes each project result, outcome, accomplishment, deliverable, improvement, or contribution in detail",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "project_results"
+          ]
+        },
+        {
+          "id": "project_review_q3_project_results_impact_criterion_3",
+          "requirement": "Explains why each project result, outcome, accomplishment, deliverable, improvement, or contribution mattered to the team, customer, stakeholder, organization, or project objective",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "project_results"
+          ]
+        },
+        {
+          "id": "project_review_q3_project_results_impact_criterion_4",
+          "requirement": "Connects each result, outcome, accomplishment, deliverable, improvement, or contribution to one or more project goals, priorities, responsibilities, or expected outcomes",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "project_results"
+          ]
+        },
+        {
+          "id": "project_review_q3_project_results_impact_criterion_5",
+          "requirement": "Cites measurable results, metrics, deadlines met, customer outcomes, stakeholder feedback, business outcomes, operational outcomes, or other evidence of impact",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "project_results"
+          ]
+        },
+        {
+          "id": "project_review_q3_project_results_impact_criterion_6",
+          "requirement": "Provides examples of actions personally taken that contributed to the project result or impact",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "project_results"
+          ]
+        },
+        {
+          "id": "project_review_q3_project_results_impact_criterion_7",
+          "requirement": "Highlights results that exceeded, met, or fell short of project expectations and explains why",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "project_results"
+          ]
+        },
+        {
+          "id": "project_review_q3_project_results_impact_criterion_8",
+          "requirement": "Notes any project outcomes that should be interpreted in light of constraints, dependencies, resource limits, or changes in scope",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "project_results"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "project_results"
+    },
+    {
+      "id": "project_review_q4_execution_ownership_follow_through",
+      "discussionArea": "Execution, Ownership & Follow-Through",
+      "question": "How did you manage your project responsibilities, follow through on commitments, and respond to changes or obstacles?",
+      "answerGuidance": [
+        "How you managed project responsibilities, commitments, deadlines, deliverables, and dependencies",
+        "Examples of ownership, accountability, prioritization, initiative, reliability, escalation, or follow-through",
+        "How your execution affected project progress, stakeholder confidence, team outcomes, customer outcomes, or final results",
+        "Whether execution was consistent, uneven, improving, constrained, or affected by changes",
+        "Any missed, delayed, reprioritized, escalated, or changed work and why it happened",
+        "How you identified risks, solved problems, asked clarifying questions, or escalated issues",
+        "What you controlled directly versus what depended on others, resources, or external conditions"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "project_review_q4_execution_ownership_follow_through_criterion_1",
+          "requirement": "Describes how the employee managed project responsibilities, commitments, deadlines, deliverables, or dependencies",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "project_review_q4_execution_ownership_follow_through_criterion_2",
+          "requirement": "Identifies one or more examples that demonstrate project ownership, accountability, prioritization, initiative, reliability, escalation, or follow-through",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "project_review_q4_execution_ownership_follow_through_criterion_3",
+          "requirement": "Explains how those examples affected project progress, project outcomes, stakeholder confidence, team outcomes, or customer outcomes",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "project_review_q4_execution_ownership_follow_through_criterion_4",
+          "requirement": "States whether execution and ownership were consistent, uneven, improving, constrained, or affected by project changes",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "project_review_q4_execution_ownership_follow_through_criterion_5",
+          "requirement": "Identifies commitments, deadlines, deliverables, responsibilities, risks, or dependencies that were missed, delayed, reprioritized, escalated, or changed",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "project_review_q4_execution_ownership_follow_through_criterion_6",
+          "requirement": "Explains why missed, delayed, reprioritized, escalated, or changed work occurred",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "project_review_q4_execution_ownership_follow_through_criterion_7",
+          "requirement": "Provides examples of proactively identifying risks, solving problems, asking clarifying questions, or escalating project issues early",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "execution_ownership"
+          ]
+        },
+        {
+          "id": "project_review_q4_execution_ownership_follow_through_criterion_8",
+          "requirement": "Distinguishes work the employee controlled directly from work that depended on manager direction, stakeholder decisions, cross-functional partners, resources, or external conditions",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "execution_ownership"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "execution_ownership"
+    },
+    {
+      "id": "project_review_q5_work_quality_project_craft",
+      "discussionArea": "Work Quality & Project Craft",
+      "question": "How would you describe the quality, accuracy, completeness, or professionalism of your project work?",
+      "answerGuidance": [
+        "The quality, accuracy, completeness, thoroughness, technical rigor, functional rigor, or professionalism of your project work",
+        "Examples of deliverables, tasks, decisions, or work products that show project quality",
+        "How your work quality compared to project standards, acceptance criteria, stakeholder needs, or expected outcomes",
+        "Whether quality was consistent, uneven, improving, constrained, or affected by changes",
+        "Evidence such as rework, errors, feedback, acceptance, quality checks, testing results, or defect patterns",
+        "Any errors, missed details, rework, quality issues, or preventable problems and what caused them",
+        "How timeline, scope, review processes, tools, feedback, resources, or dependencies affected quality"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "project_review_q5_work_quality_project_craft_criterion_1",
+          "requirement": "Describes the quality, accuracy, completeness, thoroughness, technical rigor, functional rigor, or professionalism of the employee's project work",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "work_quality"
+          ]
+        },
+        {
+          "id": "project_review_q5_work_quality_project_craft_criterion_2",
+          "requirement": "Identifies one or more examples of project work quality, craft, technical skill, functional skill, accuracy, completeness, or attention to detail",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "work_quality"
+          ]
+        },
+        {
+          "id": "project_review_q5_work_quality_project_craft_criterion_3",
+          "requirement": "Explains how each example met, exceeded, or fell short of the quality standard expected for the project",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "work_quality"
+          ]
+        },
+        {
+          "id": "project_review_q5_work_quality_project_craft_criterion_4",
+          "requirement": "States whether project work quality was consistent, uneven, improving, constrained, or affected by changing project conditions",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "work_quality"
+          ]
+        },
+        {
+          "id": "project_review_q5_work_quality_project_craft_criterion_5",
+          "requirement": "Cites evidence such as rework levels, errors, review feedback, stakeholder acceptance, deliverable acceptance, quality checks, testing results, or defect patterns",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "work_quality"
+          ]
+        },
+        {
+          "id": "project_review_q5_work_quality_project_craft_criterion_6",
+          "requirement": "Identifies any errors, missed details, rework, quality issues, incomplete work, preventable problems, or acceptance issues that occurred",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "work_quality"
+          ]
+        },
+        {
+          "id": "project_review_q5_work_quality_project_craft_criterion_7",
+          "requirement": "Explains the causes of any errors, missed details, rework, quality issues, incomplete work, preventable problems, or acceptance issues",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "work_quality"
+          ]
+        },
+        {
+          "id": "project_review_q5_work_quality_project_craft_criterion_8",
+          "requirement": "Notes how timeline, scope changes, review processes, tools, stakeholder feedback, resources, or dependencies affected project work quality",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "work_quality"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "work_quality"
+    },
+    {
+      "id": "project_review_q6_communication_collaboration_stakeholder_coordination",
+      "discussionArea": "Communication, Collaboration & Stakeholder Coordination",
+      "question": "How did communication, collaboration, and stakeholder coordination affect the project?",
+      "answerGuidance": [
+        "How you communicated with your manager, project lead, stakeholders, peers, customers, contractors, or cross-functional partners",
+        "How project updates, meetings, handoffs, decisions, feedback, documentation, and escalations happened",
+        "Communication or collaboration practices that helped project progress, quality, trust, or outcomes",
+        "Communication or collaboration issues that caused friction, delay, confusion, missed expectations, rework, risk, or negative outcomes",
+        "Examples and causes of communication successes or breakdowns",
+        "How stakeholder coordination affected the project",
+        "Improvements to communication, collaboration, meetings, feedback, documentation, or handoffs for future projects"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "project_review_q6_communication_collaboration_stakeholder_coordination_criterion_1",
+          "requirement": "Describes project communication with the manager, project lead, stakeholders, peers, customers, contractors, or cross-functional partners",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "communication_stakeholder"
+          ]
+        },
+        {
+          "id": "project_review_q6_communication_collaboration_stakeholder_coordination_criterion_2",
+          "requirement": "Describes how project updates, meetings, handoffs, decisions, feedback, documentation, or escalations typically happened",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "communication_stakeholder"
+          ]
+        },
+        {
+          "id": "project_review_q6_communication_collaboration_stakeholder_coordination_criterion_3",
+          "requirement": "Identifies communication, collaboration, stakeholder coordination, or professionalism practices that supported project progress, quality, trust, or outcomes",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "communication_stakeholder"
+          ]
+        },
+        {
+          "id": "project_review_q6_communication_collaboration_stakeholder_coordination_criterion_4",
+          "requirement": "Identifies communication, collaboration, stakeholder coordination, or professionalism practices that caused or contributed to friction, delay, confusion, missed expectations, rework, risk, or negative outcomes",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "communication_stakeholder"
+          ]
+        },
+        {
+          "id": "project_review_q6_communication_collaboration_stakeholder_coordination_criterion_5",
+          "requirement": "Provides one or more examples of how communication, collaboration, stakeholder coordination, or feedback positively affected the project",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "communication_stakeholder"
+          ]
+        },
+        {
+          "id": "project_review_q6_communication_collaboration_stakeholder_coordination_criterion_6",
+          "requirement": "Provides one or more examples of how communication, collaboration, stakeholder coordination, or feedback negatively affected the project",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "communication_stakeholder"
+          ]
+        },
+        {
+          "id": "project_review_q6_communication_collaboration_stakeholder_coordination_criterion_7",
+          "requirement": "Explains the causes of one or more communication, collaboration, stakeholder coordination, feedback, documentation, handoff, or professionalism breakdowns",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "communication_stakeholder"
+          ]
+        },
+        {
+          "id": "project_review_q6_communication_collaboration_stakeholder_coordination_criterion_8",
+          "requirement": "Suggests one or more communication, collaboration, stakeholder coordination, meeting, feedback, documentation, or handoff improvements for future projects",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "communication_stakeholder"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "communication_stakeholder"
+    },
+    {
+      "id": "project_review_q7_constraints_risks_resource_factors",
+      "discussionArea": "Constraints, Risks & Resource Factors",
+      "question": "What constraints, risks, dependencies, or resource issues affected the project, and how did they influence the outcome?",
+      "answerGuidance": [
+        "Constraints, risks, dependencies, resource issues, support needs, context factors, or fairness considerations that affected the project",
+        "Examples such as workload, staffing, tools, budget, access, timing, scope change, process, competing priorities, approval delays, or cross-functional dependencies",
+        "How those factors affected results, execution, quality, communication, timeline, stakeholder confidence, or learning",
+        "Which factors had the greatest effect on the project",
+        "Which factors you could address directly versus those requiring manager, team, stakeholder, organizational, vendor, or system support",
+        "Whether outcomes or expectations should be interpreted differently because of those factors",
+        "Risk management, resource, support, process, sequencing, or prioritization changes for future projects"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "project_review_q7_constraints_risks_resource_factors_criterion_1",
+          "requirement": "Lists one or more project constraints, risks, dependencies, resource issues, support needs, context factors, or fairness considerations that affected the project",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "constraints_risks"
+          ]
+        },
+        {
+          "id": "project_review_q7_constraints_risks_resource_factors_criterion_2",
+          "requirement": "Describes each project constraint, risk, dependency, resource issue, support need, context factor, or fairness consideration clearly and concretely",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "constraints_risks"
+          ]
+        },
+        {
+          "id": "project_review_q7_constraints_risks_resource_factors_criterion_3",
+          "requirement": "Explains how each factor affected project results, execution, quality, communication, timeline, stakeholder confidence, or learning",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "constraints_risks"
+          ]
+        },
+        {
+          "id": "project_review_q7_constraints_risks_resource_factors_criterion_4",
+          "requirement": "Identifies which constraints, risks, dependencies, resource issues, support needs, context factors, or fairness considerations had the greatest effect on the project",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "constraints_risks"
+          ]
+        },
+        {
+          "id": "project_review_q7_constraints_risks_resource_factors_criterion_5",
+          "requirement": "Provides examples involving workload, staffing, tools, budget, access, timing, scope change, process, competing priorities, approval delays, or cross-functional dependencies",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "constraints_risks"
+          ]
+        },
+        {
+          "id": "project_review_q7_constraints_risks_resource_factors_criterion_6",
+          "requirement": "Distinguishes factors the employee could address directly from factors requiring manager, team, stakeholder, organizational, vendor, or system support",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "constraints_risks"
+          ]
+        },
+        {
+          "id": "project_review_q7_constraints_risks_resource_factors_criterion_7",
+          "requirement": "Explains whether project expectations or outcomes should be interpreted differently because of constraints, risk exposure, resources, dependencies, or fairness considerations",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "constraints_risks"
+          ]
+        },
+        {
+          "id": "project_review_q7_constraints_risks_resource_factors_criterion_8",
+          "requirement": "Suggests concrete risk management, resource, support, process, sequencing, or prioritization changes that would improve similar projects in the future",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "constraints_risks"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "constraints_risks"
+    },
+    {
+      "id": "project_review_q8_lessons_learned_future_project_improvements",
+      "discussionArea": "Lessons Learned & Future Project Improvements",
+      "question": "What did you learn from this project, and what should be repeated, changed, or improved for future projects?",
+      "answerGuidance": [
+        "What you learned from the project",
+        "How those lessons relate to planning, execution, quality, communication, risk management, stakeholder coordination, or future performance",
+        "Examples of applying feedback, adapting to changes, improving judgment, handling risk, building independence, or improving work habits",
+        "Practices, decisions, behaviors, processes, supports, or project approaches that should be repeated",
+        "Practices, decisions, behaviors, processes, supports, or project approaches that should be changed or improved",
+        "Which future improvements should be prioritized, and why",
+        "Support, coaching, training, tools, resources, role clarification, or process changes needed for future projects"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "project_review_q8_lessons_learned_future_project_improvements_criterion_1",
+          "requirement": "Identifies one or more lessons learned from the project",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "lessons_learned"
+          ]
+        },
+        {
+          "id": "project_review_q8_lessons_learned_future_project_improvements_criterion_2",
+          "requirement": "Describes each lesson learned in concrete, understandable terms",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "lessons_learned"
+          ]
+        },
+        {
+          "id": "project_review_q8_lessons_learned_future_project_improvements_criterion_3",
+          "requirement": "Explains how those lessons relate to project planning, execution, quality, communication, risk management, stakeholder coordination, or future performance",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "lessons_learned"
+          ]
+        },
+        {
+          "id": "project_review_q8_lessons_learned_future_project_improvements_criterion_4",
+          "requirement": "Lists one or more practices, decisions, behaviors, processes, supports, or project approaches that should be repeated, changed, or improved for future projects",
+          "required": true,
+          "label": "Project Review",
+          "termIds": [
+            "lessons_learned"
+          ]
+        },
+        {
+          "id": "project_review_q8_lessons_learned_future_project_improvements_criterion_5",
+          "requirement": "Provides examples of applying feedback, adapting to project changes, improving judgment, handling risk, building independence, or improving work habits during the project",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "lessons_learned"
+          ]
+        },
+        {
+          "id": "project_review_q8_lessons_learned_future_project_improvements_criterion_6",
+          "requirement": "Describes each recommended future project improvement in concrete, understandable terms",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "lessons_learned"
+          ]
+        },
+        {
+          "id": "project_review_q8_lessons_learned_future_project_improvements_criterion_7",
+          "requirement": "Explains why certain repeatable practices or improvement areas should be prioritized before others",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "lessons_learned"
+          ]
+        },
+        {
+          "id": "project_review_q8_lessons_learned_future_project_improvements_criterion_8",
+          "requirement": "Identifies support, coaching, training, tools, resources, role clarification, or process changes needed to apply the lessons to future projects",
+          "required": false,
+          "label": "Project Review",
+          "termIds": [
+            "lessons_learned"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "50%",
+      "primaryTermId": "lessons_learned"
+    }
+  ]
+}

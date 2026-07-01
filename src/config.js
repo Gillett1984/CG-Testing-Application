@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import { z } from 'zod';
 import { loadBehaviorSchedule, loadScenarioFoundation } from './scenarioConfig.js';
+import { loadScriptedAnswers, validateScriptedAnswersAgainstTopic } from './scriptedAnswers.js';
 
 dotenv.config();
 
@@ -39,6 +40,7 @@ const runConfigSchema = z.object({
   qualityCriteriaPath: z.string().optional(),
   alignmentScenarioId: z.string().optional(),
   behaviorSchedulePath: z.string().optional(),
+  scriptedAnswersPath: z.string().optional(),
   scenarioSeed: z.string().optional()
 }).passthrough();
 
@@ -60,6 +62,23 @@ export function loadConfig(args) {
   const scenarioFoundation = loadScenarioFoundation(rootDir, qualityCriteria);
   const behaviorSchedulePath = cli.behaviorSchedulePath ?? runConfig.behaviorSchedulePath ?? 'config/behavior-schedules/default-six.json';
   const behaviorSchedule = scenarioFoundation ? loadBehaviorSchedule(rootDir, behaviorSchedulePath) : null;
+
+  // Scripted-answers mode (alternative run path): when a file is supplied, its
+  // pre-authored answers are used as the first response to each matched primary
+  // question. Behaviors are not injected in this mode (clean run).
+  const scriptedAnswersPath = cli.scriptedAnswersPath ?? runConfig.scriptedAnswersPath ?? null;
+  let scriptedAnswers = null;
+  if (scriptedAnswersPath) {
+    if (!scenarioFoundation) {
+      throw new Error('Scripted-answers mode requires a topic definition. Set a caseType/topic that maps to a config/case-types/*.json file.');
+    }
+    scriptedAnswers = loadScriptedAnswers(rootDir, scriptedAnswersPath);
+    const { errors, warnings } = validateScriptedAnswersAgainstTopic(scriptedAnswers, scenarioFoundation.topic);
+    for (const warning of warnings) console.warn(`[scripted-answers] ${warning}`);
+    if (errors.length) {
+      throw new Error(`Scripted answers file is invalid:\n - ${errors.join('\n - ')}`);
+    }
+  }
 
   const requestedRunMode = cli.runMode
     ?? runConfig.runMode
@@ -111,6 +130,8 @@ export function loadConfig(args) {
       alignmentScenarioId: cli.alignmentScenarioId ?? runConfig.alignmentScenarioId ?? scenarioFoundation?.alignmentScenarios.scenarios[0]?.id ?? '',
       behaviorSchedulePath,
       behaviorSchedule,
+      scriptedAnswersPath,
+      scriptedAnswers,
       scenarioSeed: cli.scenarioSeed ?? runConfig.scenarioSeed ?? '',
       validateConfigOnly: cli.validateConfig,
       maxTurns: cli.maxTurns ?? runConfig.maxTurns ?? env.MAX_TURNS,
@@ -147,6 +168,7 @@ function parseArgs(args) {
     if (arg === '--quality-criteria') parsed.qualityCriteriaPath = args[index + 1];
     if (arg === '--alignment-scenario') parsed.alignmentScenarioId = args[index + 1];
     if (arg === '--behavior-schedule') parsed.behaviorSchedulePath = args[index + 1];
+    if (arg === '--scripted-answers') parsed.scriptedAnswersPath = args[index + 1];
     if (arg === '--scenario-seed') parsed.scenarioSeed = args[index + 1];
     if (arg === '--count') parsed.count = Number(args[index + 1]);
     if (arg === '--max-turns') parsed.maxTurns = Number(args[index + 1]);
