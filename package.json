@@ -5,9 +5,10 @@
   "type": "module",
   "description": "Local Playwright automation spike for Common Ground Partner AI Getting Started tests.",
   "scripts": {
-    "ui": "node scripts/uiServer.js",
-    "test:case": "node src/index.js",
-    "test:case:headed": "node src/index.js --headed",
+    "ui": "node scripts/launch.js scripts/uiServer.js",
+    "test:case": "node scripts/launch.js src/index.js",
+    "test:case:headed": "node scripts/launch.js src/index.js --headed",
+    "preflight": "node scripts/launch.js scripts/preflightOpenAi.js",
     "validate": "node src/index.js --validate-config",
     "validate:scenarios": "node scripts/validateScenarioController.js",
     "validate:workflow": "node scripts/validateFullWorkflow.js",

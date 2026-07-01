@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import dotenv from 'dotenv';
+import { resolveCaEnv, describeCaEnv } from './localCaEnv.js';
 import { behaviorScheduleSchema, validateBehaviorCompatibility } from '../src/scenarioSchemas.js';
 import { loadScenarioFoundation } from '../src/scenarioConfig.js';
 import {
@@ -233,9 +234,11 @@ async function startRun(body) {
   activeRun = run;
   lastRun = run;
 
+  const caResolution = testProcessEnvironment();
+  appendLog(run, `${describeCaEnv(caResolution)}\n`);
   const child = spawn(process.execPath, args, {
     cwd: rootDir,
-    env: testProcessEnvironment(),
+    env: caResolution.env,
     shell: false
   });
   run.child = child;
@@ -253,12 +256,7 @@ async function startRun(body) {
 }
 
 function testProcessEnvironment() {
-  const env = { ...process.env };
-  const localCertificate = path.join(rootDir, '.tmp', 'norton-root.pem');
-  if (!env.NODE_EXTRA_CA_CERTS && fsSync.existsSync(localCertificate)) {
-    env.NODE_EXTRA_CA_CERTS = localCertificate;
-  }
-  return env;
+  return resolveCaEnv(rootDir, process.env);
 }
 
 function sanitizeRunConfig(runConfig) {

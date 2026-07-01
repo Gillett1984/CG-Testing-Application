@@ -170,5 +170,13 @@ does not affect pass/fail. Schema in `src/scenarioSchemas.js`.
 - Alignment-report `expectedRange` schema declares only `{min, max}` but runtime
   also writes `minInclusive`/`maxInclusive`, which are dropped if re-parsed
   (`src/scenarioSchemas.js`).
+- Norton Antivirus intercepts TLS on this machine and re-signs `api.openai.com`,
+  so Node `fetch` fails with `UNABLE_TO_VERIFY_LEAF_SIGNATURE` unless
+  `NODE_EXTRA_CA_CERTS` points at the Norton root CA
+  (`config/certs/norton-root.pem`, gitignored). The `ui`, `test:case`, and
+  `preflight` npm scripts route through `scripts/launch.js`, which resolves the
+  cert via `scripts/localCaEnv.js` (override with `EXTRA_CA_CERTS_PATH`); the UI
+  server also injects it into spawned runs. Quick check: `npm run preflight`.
+  Details: `config/certs/README.md`.
 </content>
 </invoke>

@@ -18,7 +18,10 @@ export async function verifyOpenAiConnectivity(llm) {
       max_tokens: 4
     });
   } catch (error) {
-    throw new Error(`OpenAI preflight failed before Common Ground case creation: ${describeError(error)}`, { cause: error });
+    const tlsHint = isTlsInterceptionError(error)
+      ? ` — TLS interception detected (e.g. Norton Web/Mail Shield re-signing HTTPS). Node must trust the intercepting root CA: NODE_EXTRA_CA_CERTS is currently ${process.env.NODE_EXTRA_CA_CERTS ? `"${process.env.NODE_EXTRA_CA_CERTS}"` : 'not set'}; expected cert at config/certs/norton-root.pem (launch via npm run ui / test:case / preflight so scripts/launch.js applies it — see config/certs/README.md).`
+      : '';
+    throw new Error(`OpenAI preflight failed before Common Ground case creation: ${describeError(error)}${tlsHint}`, { cause: error });
   }
 }
 
@@ -1838,7 +1841,12 @@ function isTransientOpenAiStatus(status) {
 }
 
 function isTransientFetchError(error) {
+  if (isTlsInterceptionError(error)) return false; // cert errors never self-resolve; fail fast
   return /fetch failed|network|socket|timeout|timed out|aborted|terminated|econnreset|etimedout|enotfound|eai_again/i.test(describeError(error));
+}
+
+function isTlsInterceptionError(error) {
+  return /UNABLE_TO_VERIFY_LEAF_SIGNATURE|SELF_SIGNED_CERT_IN_CHAIN|UNABLE_TO_GET_ISSUER_CERT_LOCALLY|UNABLE_TO_GET_ISSUER_CERT|DEPTH_ZERO_SELF_SIGNED_CERT|CERT_UNTRUSTED/i.test(describeError(error));
 }
 
 function describeError(error) {
