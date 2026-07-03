@@ -357,7 +357,14 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   if (!participantResult.passed) throw new Error(participantResult.stopReason);
 
   recordStage(artifacts, 'Participant Fact Section', 'started');
-  await completeActorPostProcessing(participantPage, config, artifacts, 'Participant', ownFactLabel);
+  await withOtherPartyGateRecovery(
+    {
+      page: participantPage, config, store, createdCase: artifacts.case,
+      actorLabel: 'Participant', waitName: 'Participant Fact Section', artifacts,
+      expectedStep: (t, u) => excerptReviewReady(t, u) || factLabelingReady(t, u)
+    },
+    () => completeActorPostProcessing(participantPage, config, artifacts, 'Participant', ownFactLabel)
+  );
   recordStage(artifacts, 'Participant Fact Section', 'passed', `All fact statements labeled ${ownFactLabel}.`);
   await participantPage.screenshot({ path: `${store.runDir}/participant-post-processing.png`, fullPage: true });
   await participantContext.close();
@@ -371,17 +378,18 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   await openCaseAsRequestor(requestorPage, config, artifacts.case, syntheticCase);
 
   recordStage(artifacts, 'Requestor Rates Participant Facts', 'started');
-  await completeCrossPartyFactReview(
-    requestorPage,
-    config,
-    artifacts.case,
-    crossPartyFactLabel,
+  await withOtherPartyGateRecovery(
     {
+      page: requestorPage, config, store, createdCase: artifacts.case,
+      actorLabel: 'Requestor', waitName: 'Requestor Rates Participant Facts', artifacts,
+      expectedStep: (t, u) => factLabelingReady(t, u) || /Rate (?:Participant|Request[eo]r)'?s Facts/i.test(t)
+    },
+    () => completeCrossPartyFactReview(requestorPage, config, artifacts.case, crossPartyFactLabel, {
       raterRole: 'requestor',
       ratedParty: 'participant',
       linkText: /Rate Participant'?s Facts/i,
       mode: 'requestor_rates_participant'
-    }
+    })
   );
   recordStage(artifacts, 'Requestor Rates Participant Facts', 'passed', `Participant facts labeled ${crossPartyFactLabel}.`);
   await requestorPage.screenshot({ path: `${store.runDir}/requestor-rates-participant-facts.png`, fullPage: true });
@@ -405,7 +413,14 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   if (!requestorResult.passed) throw new Error(requestorResult.stopReason);
 
   recordStage(artifacts, 'Requestor Fact Section', 'started');
-  await completeActorPostProcessing(requestorPage, config, artifacts, 'Requestor', ownFactLabel);
+  await withOtherPartyGateRecovery(
+    {
+      page: requestorPage, config, store, createdCase: artifacts.case,
+      actorLabel: 'Requestor', waitName: 'Requestor Fact Section', artifacts,
+      expectedStep: (t, u) => excerptReviewReady(t, u) || factLabelingReady(t, u)
+    },
+    () => completeActorPostProcessing(requestorPage, config, artifacts, 'Requestor', ownFactLabel)
+  );
   recordStage(artifacts, 'Requestor Fact Section', 'passed', `All fact statements labeled ${ownFactLabel}.`);
   await requestorPage.screenshot({ path: `${store.runDir}/requestor-post-processing.png`, fullPage: true });
   await requestorContext.close();
@@ -416,11 +431,13 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   const participantReviewPage = await participantReviewContext.newPage();
   await login(participantReviewPage, config, 'participant');
   await openCaseAsParticipant(participantReviewPage, config, artifacts.case, syntheticCase);
-  await completeParticipantFactReview(
-    participantReviewPage,
-    config,
-    artifacts.case,
-    crossPartyFactLabel
+  await withOtherPartyGateRecovery(
+    {
+      page: participantReviewPage, config, store, createdCase: artifacts.case,
+      actorLabel: 'Participant', waitName: 'Participant Rates Requestor Facts', artifacts,
+      expectedStep: (t, u) => factLabelingReady(t, u) || /Rate (?:Participant|Request[eo]r)'?s Facts/i.test(t)
+    },
+    () => completeParticipantFactReview(participantReviewPage, config, artifacts.case, crossPartyFactLabel)
   );
   recordStage(artifacts, 'Participant Rates Requestor Facts', 'passed', `Requestor facts labeled ${crossPartyFactLabel}.`);
   await participantReviewPage.screenshot({ path: `${store.runDir}/participant-rates-requestor-facts.png`, fullPage: true });
@@ -436,11 +453,11 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   try {
     await login(reportPage, config, 'requestor');
     await openCaseAsRequestor(reportPage, config, artifacts.case, syntheticCase);
-    const alignmentReportConfig = {
-      ...config,
-      run: { ...config.run, postCompletionWaitMs: Math.min(config.run.postCompletionWaitMs, 180000) }
-    };
-    const alignmentReport = await waitForAndReadAlignmentReport(reportPage, alignmentReportConfig, artifacts.case);
+    // Poll for the full configured post-processing window (e.g. 10 minutes) rather
+    // than a hard 3-minute cap. The report can take several minutes to render, and
+    // the dashboard "Latest Alignment: NN%" is read as a fallback below, so there is
+    // no benefit to giving up early.
+    const alignmentReport = await waitForAndReadAlignmentReport(reportPage, config, artifacts.case);
     artifacts.alignmentReport = {
       ...alignmentReport,
       expectedRange: config.run.scenarioFoundation.alignmentScenarios.scenarios
@@ -1152,10 +1169,20 @@ async function submitExcerptReview(page, config) {
   let lastText = '';
   let lastApprovalCount = null;
   let lastSubmitState = 'not found';
+  let gateSince = 0;
 
   while (Date.now() < deadline) {
     lastText = await readVisibleBodyText(page);
     lastApprovalCount = extractExcerptApprovalCount(lastText);
+
+    // Gated on the other actor: the Submit control will never enable in this
+    // session, so hand off instead of polling to the full timeout.
+    if (otherPartyGate(lastText) && !lastApprovalCount) {
+      if (!gateSince) gateSince = Date.now();
+      else if (Date.now() - gateSince >= OTHER_PARTY_GATE_CONFIRM_MS) throw new OtherPartyGateError('excerpt review', page.url(), lastText);
+    } else {
+      gateSince = 0;
+    }
 
     if (lastApprovalCount?.total > 0 && lastApprovalCount.approved < lastApprovalCount.total) {
       const approveAll = page.getByRole('button', { name: /^Approve All$/i }).first();
@@ -1232,6 +1259,7 @@ async function waitForWorkflowState(page, config, { name, ready }) {
   const deadline = startedAt + config.run.postCompletionWaitMs;
   let lastText = '';
   let lastUrl = page.url();
+  let gateSince = 0;
 
   while (Date.now() < deadline) {
     lastText = await readVisibleBodyText(page);
@@ -1240,6 +1268,15 @@ async function waitForWorkflowState(page, config, { name, ready }) {
       elapsedMs: Date.now() - startedAt,
       url: lastUrl
     };
+    // This step is gated on the other actor's progress and will never become ready
+    // in this session; bail out (once the gate has persisted) so the caller can hand
+    // off rather than polling to the full postCompletionWaitMs timeout.
+    if (otherPartyGate(lastText)) {
+      if (!gateSince) gateSince = Date.now();
+      else if (Date.now() - gateSince >= OTHER_PARTY_GATE_CONFIRM_MS) throw new OtherPartyGateError(name, lastUrl, lastText);
+    } else {
+      gateSince = 0;
+    }
     await page.waitForTimeout(3000);
   }
 
@@ -1364,6 +1401,7 @@ async function completeCrossPartyFactReview(page, config, createdCase, labelText
   let lastText = '';
   let lastUrl = page.url();
   let lastRefreshAt = 0;
+  let gateSince = 0;
 
   while (Date.now() < deadline) {
     lastText = await readVisibleBodyText(page);
@@ -1372,6 +1410,18 @@ async function completeCrossPartyFactReview(page, config, createdCase, labelText
     if (factLabelingReady(lastText, lastUrl)) {
       await labelFactStatements(page, config, labelText);
       return;
+    }
+
+    // Gated on the other actor: this rating will never become available in this
+    // session; throw so the caller can hand off instead of polling to the full
+    // timeout. Confirmed over OTHER_PARTY_GATE_CONFIRM_MS to ignore transient frames.
+    if (otherPartyGate(lastText)) {
+      if (!gateSince) gateSince = Date.now();
+      else if (Date.now() - gateSince >= OTHER_PARTY_GATE_CONFIRM_MS) {
+        throw new OtherPartyGateError(`${capitalizeFirst(options.raterRole)} rating of ${options.ratedParty} facts`, lastUrl, lastText);
+      }
+    } else {
+      gateSince = 0;
     }
 
     const opened = await openCrossPartyFactReviewIfRequired(page, createdCase, options);
@@ -1492,6 +1542,7 @@ async function waitForAndReadAlignmentReport(page, config, createdCase) {
       if (score !== null) {
         return {
           score,
+          source: 'report',
           url: lastUrl,
           elapsedMs: Date.now() - startedAt,
           visibleText: compactVisibleText(lastText, 4000)
@@ -1517,6 +1568,19 @@ async function waitForAndReadAlignmentReport(page, config, createdCase) {
 
     // Not on a report and no report link visible yet: reopen this case / refresh.
     if (isDashboardPage(lastUrl, lastText)) {
+      // Fallback: the dashboard lists each case with "Latest Alignment: NN%" once
+      // its report has generated. Read it for the case under test rather than
+      // insisting on landing the single-case report page.
+      const dashboardScore = extractDashboardAlignmentScore(lastText, createdCase);
+      if (dashboardScore !== null) {
+        return {
+          score: dashboardScore,
+          source: 'dashboard',
+          url: lastUrl,
+          elapsedMs: Date.now() - startedAt,
+          visibleText: compactVisibleText(lastText, 4000)
+        };
+      }
       await openCaseAsRequestor(page, config, createdCase, { caseType: config.run.caseType }).catch(() => {});
       await waitForIdle(page);
     } else {
@@ -1565,6 +1629,25 @@ function extractAlignmentScore(text) {
 
 function isValidAlignmentScore(value) {
   return Number.isFinite(value) && value >= 0 && value <= 100;
+}
+
+// Read "Latest Alignment: NN%" for the case under test from the dashboard's case
+// list. Scopes to the card that starts with the case's own CG-#### id (up to the
+// next case id) so a neighbouring case's score is never picked up. Returns null
+// when the card shows "Latest Alignment: —" (report not generated yet).
+function extractDashboardAlignmentScore(text, createdCase) {
+  const caseId = createdCase?.commonGroundId ?? createdCase?.id;
+  if (!caseId) return null;
+  const haystack = String(text ?? '');
+  const start = haystack.search(new RegExp(`\\b${escapeRegExp(caseId)}\\b`, 'i'));
+  if (start === -1) return null;
+  const rest = haystack.slice(start + caseId.length);
+  const nextId = rest.search(/\bCG-\d/i);
+  const block = nextId === -1 ? rest : rest.slice(0, nextId);
+  const match = block.match(/Latest Alignment:?\s*(\d{1,3}(?:\.\d+)?)\s*%/i);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return isValidAlignmentScore(value) ? value : null;
 }
 
 function onAlignmentReportPage(url = '', text = '') {
@@ -1911,11 +1994,160 @@ function isPostInterviewState(text) {
 }
 
 function isProcessingState(text) {
-  return /checking engagement|engagement levels?|still processing|processing your|analy[sz]ing|please wait|one moment/i.test(String(text ?? ''));
+  return /checking engagement|engagement levels?|still processing|processing your|analy[sz]ing|please wait|one moment|understanding your intent|understanding your response|thinking…|thinking\.\.\./i.test(String(text ?? ''));
 }
 
 function otherPartyGate(text) {
   return /waiting on the other party|other (?:participant|party) is still finishing|almost there/i.test(String(text ?? ''));
+}
+
+// How long the "waiting on the other party" gate must persist before a wait loop
+// treats it as a real cross-party handoff (vs. a transient frame that flips to the
+// excerpt-review/fact-labeling screen a moment later).
+const OTHER_PARTY_GATE_CONFIRM_MS = 15000;
+
+// Thrown by post-processing wait loops when the current step is gated on the OTHER
+// actor's progress ("Almost there, just waiting on the other party") and therefore
+// will never become ready in this session. Carries diagnostics so the orchestrator
+// can log/screenshot the exact handoff point instead of polling to the full timeout.
+class OtherPartyGateError extends Error {
+  constructor(waitName, url, visibleText) {
+    super(`Blocked at the "waiting on the other party" gate during ${waitName}.`);
+    this.name = 'OtherPartyGateError';
+    this.waitName = waitName;
+    this.url = url;
+    this.visibleText = String(visibleText ?? '');
+  }
+}
+
+// Always write the gate screenshot to a stable per-actor path — even when the gate is
+// thrown outside a wait loop (a stage transition or post-navigation check).
+async function captureGateScreenshot(page, store, actorLabel) {
+  const slug = actorLabel.toLowerCase().replace(/\s+/g, '-');
+  const screenshotPath = `${store.runDir}/${slug}-other-party-gate.png`;
+  await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
+  return screenshotPath;
+}
+
+// Phase 2 handoff: recover from the cross-party gate in the SAME browser session (no
+// account switch). Screenshot (always) → Back to Dashboard → the case row for
+// createdCase.commonGroundId → Begin Discussion. Each click waits up to
+// OTHER_PARTY_GATE_CONFIRM_MS; a miss/wrong page returns { recovered: false } so the
+// caller can fall back to the Phase 1 stop.
+async function recoverViaDashboard(page, config, createdCase, store, actorLabel, waitName) {
+  const screenshotPath = await captureGateScreenshot(page, store, actorLabel);
+  const caseId = createdCase?.commonGroundId ?? '';
+
+  const clickWithin = async (locator) => {
+    if (!await locator.isVisible({ timeout: OTHER_PARTY_GATE_CONFIRM_MS }).catch(() => false)) return false;
+    await locator.click().catch(() => {});
+    await waitForIdle(page);
+    return true;
+  };
+
+  const backToDashboard = page.getByRole('link', { name: /Back to Dashboard/i })
+    .or(page.getByRole('button', { name: /Back to Dashboard/i }))
+    .first();
+  if (!await clickWithin(backToDashboard)) {
+    return { recovered: false, screenshotPath, failureReason: 'Back to Dashboard not found' };
+  }
+  if (!isDashboardPage(page.url(), await readVisibleBodyText(page))) {
+    await ensureOnDashboard(page, config).catch(() => {});
+  }
+
+  const caseRow = page.getByText(caseId, { exact: false }).first();
+  if (!caseId || !await clickWithin(caseRow)) {
+    return { recovered: false, screenshotPath, failureReason: `case row ${caseId || '(no id)'} not found on dashboard` };
+  }
+
+  const beginDiscussion = page.getByRole('link', { name: /Begin Discussion|Getting Started/i })
+    .or(page.getByRole('button', { name: /Begin Discussion|Getting Started/i }))
+    .first();
+  if (!await clickWithin(beginDiscussion)) {
+    return { recovered: false, screenshotPath, failureReason: 'Begin Discussion not found on case page' };
+  }
+
+  console.log(`[gate] Phase 2 handoff: returned via dashboard for ${actorLabel} at ${waitName}`);
+  return { recovered: true, screenshotPath };
+}
+
+// Runs ONLY after a dashboard handoff, before re-running the stage. Refuses to resume
+// on anything but the expected pending step, so a handoff that lands on the interview
+// (or anywhere ambiguous) stops cleanly instead of re-submitting. Rolls its bounded
+// window forward only while CG is genuinely processing (reads isProcessingState — does
+// not modify it), so legitimate post-handoff processing doesn't trigger a false stop;
+// a persistent gate deliberately expires the window and stops.
+async function confirmOnExpectedStep(page, config, expectedStep) {
+  let deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    const text = await readVisibleBodyText(page);
+    const url = page.url();
+    // A ready interview input means the handoff dropped us into the conversation, not
+    // the pending post-processing/rating step → refuse to resume (never re-run turns).
+    if (await findReadyResponseInput(page, config.selectors.partnerAi.responseInput, 300)) return false;
+    if (expectedStep(text, url)) return true;
+    if (isProcessingState(text)) deadline = Math.max(deadline, Date.now() + 30000); // still working → keep confirming
+    await page.waitForTimeout(1500);
+  }
+  return false;
+}
+
+function recordGateOutcome(artifacts, actorLabel, waitName, screenshotPath, url, outcome, passed) {
+  artifacts.softAssertions.push({
+    type: 'workflow_other_party_gate',
+    passed,
+    expected: `${actorLabel} proceeds past "waiting on the other party" during ${waitName}.`,
+    observed: `${outcome} at ${waitName} (${actorLabel}). Screenshot: ${screenshotPath}. URL: ${url}.`
+  });
+}
+
+function makeGateStop(actorLabel, waitName, screenshotPath, url, reason) {
+  const gateError = new Error(
+    `Workflow gated at "waiting on the other party" during ${waitName} (${actorLabel}); ${reason}. Screenshot: ${screenshotPath}.`
+  );
+  gateError.otherPartyGate = { actorLabel, waitName, screenshotPath, url };
+  return gateError;
+}
+
+// Runs a gate-prone stage with Phase 1 detection + Phase 2 recovery. When no gate
+// fires, this is byte-for-byte a direct `await stageFn()` — no added reads, waits, or
+// clicks. Detection happens inside each stage's own wait loop (which throws
+// OtherPartyGateError). On the gate it performs ONE dashboard handoff, confirms CG is
+// back on the expected step, then retries the stage — resuming from the next expected
+// wait. If the handoff fails, we are not on the expected step, or it is still gated
+// after one handoff, it stops with a clear error + screenshot (Phase 1 fallback).
+// Re-running a stage can never re-run interview turns: the interview-submission code
+// lives only in runPartnerAiInterview, which these stages never call.
+async function withOtherPartyGateRecovery(ctx, stageFn) {
+  const { page, config, store, createdCase, actorLabel, waitName, artifacts, expectedStep } = ctx;
+  let recoveriesUsed = 0;
+  while (true) {
+    try {
+      return await stageFn();
+    } catch (error) {
+      if (!(error instanceof OtherPartyGateError)) throw error;
+      const stage = error.waitName ?? waitName;
+
+      if (recoveriesUsed >= 1) {
+        const shot = await captureGateScreenshot(page, store, actorLabel);
+        recordGateOutcome(artifacts, actorLabel, stage, shot, error.url, 'still gated after one dashboard handoff', false);
+        throw makeGateStop(actorLabel, stage, shot, error.url, 'still gated after one dashboard handoff');
+      }
+
+      recoveriesUsed += 1;
+      const recovery = await recoverViaDashboard(page, config, createdCase, store, actorLabel, stage);
+      if (!recovery.recovered) {
+        recordGateOutcome(artifacts, actorLabel, stage, recovery.screenshotPath, error.url, `handoff failed: ${recovery.failureReason}`, false);
+        throw makeGateStop(actorLabel, stage, recovery.screenshotPath, error.url, `dashboard handoff failed (${recovery.failureReason})`);
+      }
+      if (!await confirmOnExpectedStep(page, config, expectedStep)) {
+        recordGateOutcome(artifacts, actorLabel, stage, recovery.screenshotPath, error.url, 'handed off but not on the expected step', false);
+        throw makeGateStop(actorLabel, stage, recovery.screenshotPath, error.url, 'after handoff, not on the expected step; not re-running to avoid duplicate submission');
+      }
+      recordGateOutcome(artifacts, actorLabel, stage, recovery.screenshotPath, error.url, 'recovered via dashboard handoff', true);
+      // confirmed → loop retries stageFn once; resumes the wait, acts once, cannot re-run turns.
+    }
+  }
 }
 
 // After the requestor submits ratings of the participant's facts, the "Getting

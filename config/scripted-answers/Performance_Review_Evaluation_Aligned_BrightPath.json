@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "topicId": "performance_review_evaluation",
+  "alignmentScenarioId": "well_aligned_outstanding",
   "name": "BrightPath CSM - Aligned",
   "description": "Aligned performance review. Customer Success Manager and Director of Customer Success largely agree on strong results, reliable execution, and good communication, with a small honest gap on enterprise negotiation growth.",
   "answers": [

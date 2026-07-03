@@ -259,6 +259,10 @@ export const scriptedAnswerEntrySchema = z.object({
 export const scriptedAnswersSchema = z.object({
   schemaVersion: z.literal(1),
   topicId: z.string().min(1),
+  // Selects the alignment scenario for the run (drives cross-party fact labels
+  // and the record-only expected range). Cross-checked against the topic's
+  // scenario catalog in loadConfig. Optional; falls back to runConfig/topic default.
+  alignmentScenarioId: z.string().min(1).optional(),
   name: z.string().min(1).optional(),
   description: z.string().min(1).optional(),
   answers: z.array(scriptedAnswerEntrySchema).min(1)
