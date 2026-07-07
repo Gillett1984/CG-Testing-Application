@@ -601,7 +601,7 @@ async function createCase(page, config, syntheticCase) {
 
 async function waitForCreatedCaseId(page, config, existingCaseIds = []) {
   const knownIds = new Set(existingCaseIds.map((id) => id.toUpperCase()));
-  const deadline = Date.now() + 90000;
+  const deadline = Date.now() + 300000;
   let lastText = '';
 
   while (Date.now() < deadline) {
@@ -674,6 +674,9 @@ async function startGettingStarted(page, config, createdCase) {
 }
 
 async function runPartnerAiInterview(page, config, transcript, options = {}) {
+  // A first-run onboarding tour modal can overlay the Groundwork page and block
+  // the response input; dismiss it before we wait for the interview to be ready.
+  await dismissOnboardingTourModal(page);
   await waitForInterviewReady(page, config);
 
   // Scripted-answers mode: which primary questions this actor has already
@@ -1907,6 +1910,53 @@ async function readLatestPrompt(page, config) {
   return waitForStableLocatorText(locator, page);
 }
 
+// Common Ground shows a first-run onboarding tour modal ("Start Groundwork with
+// confidence", "Step N of M") on the Groundwork / interview page. It overlays the
+// page and blocks the response input. We dismiss it via "Don't show again" so it
+// never returns for the account (falling back to the X icon, then Escape). If the
+// modal is not present this returns instantly (timeout:0 checks) with no waits or
+// clicks, so the happy path is never slowed.
+async function dismissOnboardingTourModal(page) {
+  const tourSignal = /Step \d+ of \d+|Start Groundwork with confidence|Take a tour|Start Tour/i;
+
+  // Cheap presence check: timeout 0 resolves synchronously, so a missing modal
+  // returns immediately without waiting or clicking anything.
+  const dialogModal = page.getByRole('dialog').filter({ hasText: tourSignal }).first();
+  let present = await dialogModal.isVisible({ timeout: 0 }).catch(() => false);
+
+  if (!present) {
+    // Fallback for builds that don't tag the tour with a dialog role: match the
+    // distinctive heading text directly.
+    const textModal = page.getByText(/Start Groundwork with confidence/i).first();
+    present = await textModal.isVisible({ timeout: 0 }).catch(() => false);
+  }
+  if (!present) return false;
+
+  // Preferred: "Don't show again" (link or button) so the tour never reappears.
+  const dontShow = page.getByRole('link', { name: /Don'?t show again/i })
+    .or(page.getByRole('button', { name: /Don'?t show again/i }))
+    .first();
+  if (await dontShow.isVisible({ timeout: 0 }).catch(() => false)) {
+    await dontShow.click().catch(() => {});
+    await page.waitForTimeout(300);
+    return true;
+  }
+
+  // Fallback 1: the X close icon in the modal's top-right corner.
+  const closeIcon = dialogModal.getByRole('button', { name: /close|dismiss|^x$/i }).first()
+    .or(page.getByRole('button', { name: /close|dismiss|^x$/i }).first());
+  if (await closeIcon.isVisible({ timeout: 0 }).catch(() => false)) {
+    await closeIcon.click().catch(() => {});
+    await page.waitForTimeout(300);
+    return true;
+  }
+
+  // Fallback 2: Escape.
+  await page.keyboard.press('Escape').catch(() => {});
+  await page.waitForTimeout(300);
+  return true;
+}
+
 async function waitForInterviewReady(page, config) {
   const inputSelector = config.selectors.partnerAi.responseInput;
   let deadline = Date.now() + 600000;
@@ -1914,6 +1964,9 @@ async function waitForInterviewReady(page, config) {
   let lastInputState = '';
 
   while (Date.now() < deadline) {
+    // Cheap per-pass check: close the onboarding tour modal if it appears
+    // mid-flow so it never blocks the response input (no-op when absent).
+    await dismissOnboardingTourModal(page);
     const visibleText = await readVisibleBodyText(page);
     lastVisibleText = visibleText;
     if (participantFactRatingRequired(visibleText)) {
