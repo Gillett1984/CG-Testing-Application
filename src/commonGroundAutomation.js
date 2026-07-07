@@ -1647,7 +1647,7 @@ function extractDashboardAlignmentScore(text, createdCase) {
   const rest = haystack.slice(start + caseId.length);
   const nextId = rest.search(/\bCG-\d/i);
   const block = nextId === -1 ? rest : rest.slice(0, nextId);
-  const match = block.match(/Latest Alignment:?\s*(\d{1,3}(?:\.\d+)?)\s*%/i);
+  const match = block.match(/Latest Alignment\s*:?\s*(\d{1,3}(?:\.\d+)?)\s*%/i);
   if (!match) return null;
   const value = Number(match[1]);
   return isValidAlignmentScore(value) ? value : null;
