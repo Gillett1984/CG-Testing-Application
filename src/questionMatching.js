@@ -25,18 +25,51 @@ export function matchScenarioQuestion(topic, promptContext) {
 // Like matchScenarioQuestion but also returns the winning similarity score, so
 // callers (e.g. scripted-answers diagnostics) can record match confidence.
 export function matchScenarioQuestionScored(topic, promptContext, threshold = 0.34) {
-  const candidates = [promptContext.primaryQuestion, promptContext.activeQuestion, promptContext.discussionArea].filter(Boolean);
+  const primaryMatch = bestQuestionMatch(topic, promptContext.primaryQuestion);
+  const activeMatch = bestQuestionMatch(topic, promptContext.activeQuestion);
+  const discussionMatch = bestQuestionMatch(topic, promptContext.discussionArea);
+  const activeDiffersFromSidebar = normalizeForCompare(promptContext.activeQuestion)
+    !== normalizeForCompare(promptContext.primaryQuestion);
+
+  // The live page can leave Details & Guidance open on a previous sidebar
+  // question while the latest Partner AI chat message has already advanced.
+  // Prefer a strong latest-message match over stale sidebar text in that case.
+  if (activeDiffersFromSidebar && activeMatch.score >= Math.max(threshold, 0.5)) {
+    return { question: activeMatch.question, score: activeMatch.score, source: 'activeQuestion' };
+  }
+
+  const matches = [
+    { ...primaryMatch, source: 'primaryQuestion' },
+    { ...activeMatch, source: 'activeQuestion' },
+    { ...discussionMatch, source: 'discussionArea' }
+  ];
+  const best = matches.reduce((winner, current) => (current.score > winner.score ? current : winner), matches[0]);
+  return best.score >= threshold
+    ? { question: best.question, score: best.score, source: best.source }
+    : { question: null, score: best.score, source: best.source };
+}
+
+function bestQuestionMatch(topic, candidate) {
+  if (!candidate) return { question: null, score: 0 };
   let best = null;
   let bestScore = 0;
   for (const question of topic.primaryQuestions) {
-    const values = [question.question, question.discussionArea];
-    const score = Math.max(...candidates.flatMap((candidate) => values.map((value) => textSimilarity(candidate, value))));
+    const values = [
+      question.question,
+      question.discussionArea,
+      ...(question.highQualityCriteria ?? []).map((criterion) => criterion.requirement)
+    ].filter(Boolean);
+    const score = Math.max(...values.map((value) => textSimilarity(candidate, value)));
     if (score > bestScore) {
       best = question;
       bestScore = score;
     }
   }
-  return bestScore >= threshold ? { question: best, score: bestScore } : { question: null, score: bestScore };
+  return { question: best, score: bestScore };
+}
+
+function normalizeForCompare(value) {
+  return String(value ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 export function matchScenarioCriterion(question, activeQuestion) {

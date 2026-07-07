@@ -25,12 +25,13 @@ export async function verifyOpenAiConnectivity(llm) {
   }
 }
 
-export async function generateScenarioDossiers({ llm, topic, scenario, seed }) {
+export async function generateScenarioDossiers({ llm, topic, scenario, seed, variationPrompt = '' }) {
   return buildScenarioDossiers({
     llm,
     topic,
     scenario,
     seed,
+    variationPrompt,
     completeJson: async (activeLlm, request) => {
       const text = await createChatCompletion(activeLlm, {
         messages: [
@@ -224,6 +225,7 @@ function isCompactStyleFailure(validation) {
 function buildGenerationInput(context, promptContext, activeQualityCriteria) {
   const actorPerspective = resolveActorPerspective({
     actorRole: context.actorRole ?? 'requestor',
+    actorPersona: context.actorPersona,
     scriptedMode: context.scriptedMode ?? false,
     promptContext,
     transcript: context.transcript,
@@ -256,6 +258,7 @@ function buildScenarioPolicyDecision(input, behaviorPlan = buildBehaviorComposit
   const scenarioTurn = input.scenarioTurn;
   const assignments = scenarioTurn.behaviors ?? [];
   const directives = assignments.map((assignment) => scenarioBehaviorDirective(assignment)).filter(Boolean);
+  const allowsPlannedContradiction = assignments.some((assignment) => assignment.behaviorId === 'contradiction' && assignment.stage === 'contradict_fact');
 
   return {
     action: behaviorPlan.mode === 'defer' ? 'perform_behavior_only' : 'answer',
@@ -275,13 +278,22 @@ function buildScenarioPolicyDecision(input, behaviorPlan = buildBehaviorComposit
       behaviorPlan.mode === 'defer'
         ? 'The scheduled behavior takes precedence. Do not include the substantive scenario answer on this turn; it is preserved for a later response.'
         : 'Use the baseScenarioResponse as the substantive answer, changing only what is necessary to visibly perform the scheduled behavior.',
+      allowsPlannedContradiction
+        ? 'For contradiction:contradict_fact, contradict only the retained earlier fact for that scheduled behavior. Do not contradict the employee role, shared event, project, rating stance, actor perspective, or unrelated retained facts.'
+        : '',
       ...directives
-    ].join(' '),
+    ].filter(Boolean).join(' '),
     mustAddress: [
       ...(behaviorPlan.mode === 'defer' ? [] : ['the latest Partner AI prompt', 'the assigned actor rating interpretation']),
       ...assignments.map((assignment) => `${assignment.behaviorId}:${assignment.stage}`)
     ],
-    mustAvoid: ['changing the shared event', 'changing the employee role', 'answering from the other actor perspective', 'softening or reversing the assigned rating'],
+    mustAvoid: [
+      'changing the shared event',
+      'changing the employee role',
+      'answering from the other actor perspective',
+      'softening or reversing the assigned rating',
+      ...(allowsPlannedContradiction ? ['contradicting anything except the scheduled retained fact'] : [])
+    ],
     stopAfterResponse: false,
     reason: assignments.length
       ? `Materialized scenario behavior controls this turn in ${behaviorPlan.mode} mode.`
@@ -999,13 +1011,17 @@ function buildGenerationMessages(input, correction = null) {
       'When a term\'s assigned ratingId is "unsatisfactory" or "needs_improvement", lead with that conclusion in plain strong language (e.g. materially below expectations / meaningful gaps requiring focused improvement) and do not soften it into a balanced, mixed, or neutral assessment; mention favorable counter-evidence only briefly and explain why it does not change the rating. When the assigned ratingId is "outstanding" or "exceeds_expectations", state that strong conclusion first and do not hedge it down toward "meets expectations".'
     );
     if (input.behaviorPlan) {
+      const allowsPlannedContradiction = input.behaviorPlan.stages.includes('contradiction:contradict_fact');
       systemContent.push(
         `Behavior composition mode: ${input.behaviorPlan.mode}.`,
         `Required visible behavior stages: ${input.behaviorPlan.stages.join(', ')}.`,
         input.behaviorPlan.mode === 'defer'
           ? 'Return only the behavior response. Do not include or summarize baseScenarioResponse yet.'
           : 'Preserve the substance of baseScenarioResponse while visibly applying every required behavior stage.',
-        'A behavior counts only when its required words or structure are plainly visible in the submitted response. Make the behavior unmistakable: for a clarification, definition, or example request include a direct question; for uncertainty, say plainly that you are unsure or it is hard to judge; for fatigue, say plainly that this is tiring or hard to focus on.'
+        'A behavior counts only when its required words or structure are plainly visible in the submitted response. Make the behavior unmistakable: for a clarification, definition, or example request include a direct question; for uncertainty, say plainly that you are unsure or it is hard to judge; for fatigue, say plainly that this is tiring or hard to focus on.',
+        allowsPlannedContradiction
+          ? 'For contradiction:contradict_fact, the only allowed inconsistency is with the retained fact attached to that scheduled behavior. Keep all immutable scenario facts, role, project, actor perspective, and rating stance unchanged.'
+          : ''
       );
     }
   }
@@ -1081,6 +1097,7 @@ async function validateGeneratedResponse(llm, input, candidateResponse) {
           'Only treat rating direction as a hard problem when the candidate directly contradicts the assigned rating.',
           'If policyDecision.useQualityCriteria is false, do not require high-quality criteria coverage.',
           'If policyDecision.action is perform_behavior_only, the response must visibly perform the scheduled behavior and must not be required to answer the substantive prompt yet.',
+          'If scenarioTurn.behaviors includes contradiction:contradict_fact, allow a conflict only with the retained fact for that same scheduled contradiction. Still fail contradictions against immutable sharedEvent facts, employee role, project, actor perspective, assigned rating stance, or unrelated retained facts.',
           'If policyDecision.quality is low or policyDecision.specificity is vague, a vague or general response is correct and a detailed high-quality response should fail if it violates mustAvoid.',
           'pass must be true only if the response directly answers the latest Partner AI prompt and follows the active maneuver or responsePlan.',
           'If the active maneuver says partial-answer or responsePlan mode partial, do not require all quality criteria. Judge only whether the requested partial criterion is answered.',
@@ -1113,7 +1130,7 @@ async function validateGeneratedResponse(llm, input, candidateResponse) {
     ],
     model: llm.judgeModel ?? llm.model,
     temperature: 0,
-    max_tokens: 300,
+    max_tokens: 600,
     response_format: { type: 'json_object' }
   });
 
@@ -1444,19 +1461,13 @@ function withBehaviorValidation(result, behaviorCheck = {}) {
   };
 }
 
-function resolveActorPerspective({ actorRole, scriptedMode }) {
-  // Perspective is fixed by the assigned actor role, not inferred per turn.
-  // In scripted-answers mode the live Common Ground role assignment applies: the
-  // invited participant is the employee doing a self-assessment (first person) and
-  // the requestor who created the case is the manager evaluating the employee
-  // (third person). This matches the scripted answer mapping in scriptedAnswers.js
-  // (participant = employee answer, requestor = manager answer).
+function resolveActorPerspective({ actorRole, actorPersona, scriptedMode }) {
+  if (actorPersona === 'employee') return 'employee_self_assessment';
+  if (actorPersona === 'manager') return 'manager_evaluating_employee';
+  // Backward-compatible fallback for older configs and direct script calls.
   if (scriptedMode) {
     return actorRole === 'participant' ? 'employee_self_assessment' : 'manager_evaluating_employee';
   }
-  // Scenario (non-scripted) mode keeps the original mapping, which mirrors the
-  // actor->dossier mapping hardcoded in scenarioController.js (requestor = employee
-  // positions, participant = manager positions).
   return actorRole === 'participant' ? 'manager_evaluating_employee' : 'employee_self_assessment';
 }
 
@@ -1486,6 +1497,7 @@ function responseMatchesRating(response, ratingId) {
   const signalPatterns = {
     unsatisfactory: [
       /\b(?:serious|material|significant|substantial|persistent|repeated) (?:gap|gaps|shortfall|shortfalls|problem|problems|failure|failures)\b/,
+      /\b(?:errors?|incomplete detail|rework|fixes|corrections?|quality issues?)\b/,
       /\b(?:inconsistent|unreliable|insufficient|inadequate|ineffective|poorly|missed|delayed|failed)\b/,
       /\b(?:required|requires|needed|needs) (?:frequent |substantial |continued )?(?:manager )?(?:intervention|correction|oversight|support)\b/,
       /\b(?:favorable|positive) (?:evidence|result|results|improvement) (?:is|was|remains?) (?:not |still not )?(?:enough|sufficient|consistent)\b/
@@ -1524,7 +1536,7 @@ function responseContradictsRating(response, ratingId) {
     exceeds_expectations: /\b(?:unsatisfactory|materially below expectations|does not meet expectations|well below expectations)\b/,
     meets_expectations: /\b(?:unsatisfactory|materially below expectations|well below expectations|outstanding|exceptional performance|significantly exceeds expectations)\b/,
     needs_improvement: /\b(?:outstanding|exceptional performance|significantly exceeds expectations|consistently surpasses expectations)\b/,
-    unsatisfactory: /\b(?:meets? (?:the )?(?:standard |normal |role )?expectations?|satisfactory|outstanding|exceptional performance|significantly exceeds (?:the )?(?:standard |normal |role )?expectations?|consistently surpasses expectations|performance is above expectations)\b/
+    unsatisfactory: /\b(?:meets? (?:the )?(?:normal |role )?expectations?|satisfactory|outstanding|exceptional performance|significantly exceeds (?:the )?(?:standard |normal |role )?expectations?|consistently surpasses expectations|performance is above expectations)\b/
   };
   return contradictions[ratingId]?.test(response) ?? false;
 }
@@ -1707,7 +1719,7 @@ function getHeuristicWarning(input, response) {
 
 function parseValidationResult(rawText) {
   try {
-    const parsed = JSON.parse(rawText);
+    const parsed = JSON.parse(extractJsonObjectText(rawText));
     return {
       pass: Boolean(parsed.pass),
       reason: String(parsed.reason ?? ''),
@@ -1720,6 +1732,17 @@ function parseValidationResult(rawText) {
       correction: 'Rewrite the response to directly answer the latest Partner AI prompt in a concise complete answer.'
     };
   }
+}
+
+function extractJsonObjectText(rawText) {
+  const text = String(rawText ?? '').trim();
+  if (text.startsWith('{')) return text;
+  const fenced = text.match(/```(?:json)?\s*({[\s\S]*?})\s*```/i);
+  if (fenced) return fenced[1];
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) return text.slice(firstBrace, lastBrace + 1);
+  return text;
 }
 
 function responseTokenBudget(input, isRetry = false) {

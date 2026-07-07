@@ -1,6 +1,6 @@
 const PROMPT_LEAK_PATTERN = /\b(assigned rating|scenario requirement|test requirement|synthetic (?:test|data)|dossier|system prompt|user prompt)\b/i;
 
-export async function generateScenarioDossiers({ llm, topic, scenario, seed, completeJson }) {
+export async function generateScenarioDossiers({ llm, topic, scenario, seed, variationPrompt = '', completeJson }) {
   if (!llm?.apiKey) throw new Error('OPENAI_API_KEY is required to generate scenario dossiers.');
   if (typeof completeJson !== 'function') throw new Error('A JSON completion function is required to generate scenario dossiers.');
 
@@ -17,6 +17,7 @@ export async function generateScenarioDossiers({ llm, topic, scenario, seed, com
         'Create a fresh, viewpoint-neutral evidence packet for one fictional workplace performance review.',
         'Return only valid JSON.',
         'The case must be original for this unique seed: invent a new role, goals, projects, events, and metrics.',
+        'If a variationRequest is supplied, use it only to vary the workplace role, project setting, metrics, or accomplishment pattern while preserving all required topic terms and scenario relationships.',
         'Do not invent an employee name. Set canonicalProfile.employeeName to "the employee".',
         'Do not write from either the employee or manager viewpoint and do not decide who is correct.',
         'For every performance term, include objective evidence that can independently support both the highest and lowest evaluation when those endpoints are requested.',
@@ -30,6 +31,7 @@ export async function generateScenarioDossiers({ llm, topic, scenario, seed, com
       input: {
         caseSeed: seed,
         actor: 'neutral',
+        variationRequest: cleanVariationPrompt(variationPrompt),
         topic: topicInput,
         interpretiveRangeNeeded: pairRatings(employeeRatings, managerRatings),
         requiredShape: evidencePacketShapeDescription()
@@ -114,6 +116,10 @@ export async function generateScenarioDossiers({ llm, topic, scenario, seed, com
     }
   }
   throw new Error(`manager scenario dossier generation failed pairwise validation after retry: ${pairIssue}`);
+}
+
+function cleanVariationPrompt(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, 1000);
 }
 
 async function generateScenarioExpressionPlan({ llm, completeJson, topic, topicInput, scenario, seed, evidencePacket, employeeRatings, managerRatings, expressionRequirements }) {

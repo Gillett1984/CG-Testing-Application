@@ -23,17 +23,18 @@ export function loadScriptedAnswers(rootDir, relativePath) {
 // who created the case is the Manager (third-person assessment). So the
 // participant speaks with the employee answer and the requestor with the manager
 // answer.
-function actorAnswerKey(actorRole) {
+function actorAnswerKey(actorRole, actorPersona = null) {
+  if (actorPersona === 'employee' || actorPersona === 'manager') return actorPersona;
   return actorRole === 'participant' ? 'employee' : 'manager';
 }
 
 // Returns the scripted answer string for an actor + primary question, or null
 // when no answer is scripted for that side (caller then falls back to the LLM).
-export function pickScriptedAnswer(scriptedAnswers, primaryQuestionId, actorRole) {
+export function pickScriptedAnswer(scriptedAnswers, primaryQuestionId, actorRole, actorPersona = null) {
   if (!scriptedAnswers || !primaryQuestionId) return null;
   const entry = scriptedAnswers.answers.find((item) => item.primaryQuestionId === primaryQuestionId);
   if (!entry) return null;
-  return entry[actorAnswerKey(actorRole)] ?? null;
+  return entry[actorAnswerKey(actorRole, actorPersona)] ?? null;
 }
 
 // Cross-checks a scripted-answers file against a topic definition. Returns

@@ -1,3 +1,7 @@
+import fsSync from 'node:fs';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import crypto from 'node:crypto';
 import { chromium } from 'playwright';
 import { buildSyntheticCase } from './syntheticData.js';
 import { generatePartnerAiResponse, generateScenarioDossiers, verifyOpenAiConnectivity } from './llmResponder.js';
@@ -8,7 +12,10 @@ import { matchScenarioQuestion, matchScenarioQuestionScored, matchScenarioCriter
 import { pickScriptedAnswer } from './scriptedAnswers.js';
 
 export async function runAutomation(config, store) {
-  if (config.run.runMode !== 'fact_labeling_smoke') await verifyOpenAiConnectivity(config.llm);
+  if (config.run.runMode !== 'fact_labeling_smoke' && !config.llm.connectivityVerified) {
+    await verifyOpenAiConnectivity(config.llm);
+    config.llm.connectivityVerified = true;
+  }
   const browser = await chromium.launch(config.browser);
   const requestorTranscript = [];
   const participantTranscript = [];
@@ -19,6 +26,11 @@ export async function runAutomation(config, store) {
     caseType: config.run.caseType,
     runMode: config.run.runMode,
     workflowScope: config.run.workflowScope,
+    interviewStartActor: config.run.interviewStartActor,
+    dossierMode: config.run.dossierMode,
+    dossierVariationPrompt: config.run.dossierVariationPrompt,
+    screenshotMode: config.run.screenshotMode,
+    reuseAuthState: config.run.reuseAuthState,
     existingCaseId: config.run.existingCaseId,
     testObjective: config.run.testObjective,
     testBehaviorPolicy: config.run.testBehaviorPolicy,
@@ -54,9 +66,7 @@ export async function runAutomation(config, store) {
     if (config.run.runMode === 'participant_getting_started') {
       artifacts.case = existingCaseFromConfig(config, syntheticCase);
       recordStage(artifacts, 'Open existing case', 'started', artifacts.case.commonGroundId);
-      const participantInterviewContext = await browser.newContext();
-      const participantInterviewPage = await participantInterviewContext.newPage();
-      await login(participantInterviewPage, config, 'participant');
+      const { context: participantInterviewContext, page: participantInterviewPage } = await newAuthenticatedPage(browser, config, 'participant');
       await openCaseAsParticipant(participantInterviewPage, config, artifacts.case, syntheticCase);
       recordStage(artifacts, 'Open existing case', 'passed', artifacts.case.commonGroundId);
 
@@ -75,32 +85,26 @@ export async function runAutomation(config, store) {
       artifacts.finalUrl = participantInterviewPage.url();
       artifacts.finalVisibleText = await readVisibleBodyText(participantInterviewPage);
       recordStage(artifacts, 'Participant Getting Started', participantResult.passed ? 'passed' : 'failed', participantResult.stopReason);
-      await participantInterviewPage.screenshot({ path: `${store.runDir}/participant-final.png`, fullPage: true });
+      await captureCheckpointScreenshot(participantInterviewPage, config, store, 'participant-final.png');
       await participantInterviewContext.close();
       artifacts.finishedAt = new Date().toISOString();
       return artifacts;
     }
 
     recordStage(artifacts, 'Create case', 'started');
-    const requestorContext = await browser.newContext();
-    const requestorPage = await requestorContext.newPage();
-    await login(requestorPage, config, 'requestor');
+    const { context: requestorContext, page: requestorPage } = await newAuthenticatedPage(browser, config, 'requestor');
     artifacts.case = await createCase(requestorPage, config, syntheticCase);
     await requestorContext.close();
     recordStage(artifacts, 'Create case', 'passed', artifacts.case?.commonGroundId ?? artifacts.case?.syntheticReference ?? '');
 
     recordStage(artifacts, 'Accept participant invitation', 'started');
-    const participantContext = await browser.newContext();
-    const participantPage = await participantContext.newPage();
-    await login(participantPage, config, 'participant');
+    const { context: participantContext, page: participantPage } = await newAuthenticatedPage(browser, config, 'participant');
     await acceptCaseRequest(participantPage, config, syntheticCase, artifacts.case);
     await participantContext.close();
     recordStage(artifacts, 'Accept participant invitation', 'passed');
 
     recordStage(artifacts, 'Requestor Getting Started', 'started');
-    const interviewContext = await browser.newContext();
-    const interviewPage = await interviewContext.newPage();
-    await login(interviewPage, config, 'requestor');
+    const { context: interviewContext, page: interviewPage } = await newAuthenticatedPage(browser, config, 'requestor');
     await openCaseAsRequestor(interviewPage, config, artifacts.case, syntheticCase);
     await startGettingStarted(interviewPage, config, artifacts.case);
     updateArtifactCaseId(artifacts, await findCaseId(interviewPage));
@@ -125,7 +129,7 @@ export async function runAutomation(config, store) {
       : '';
     artifacts.status = requestorResult.passed ? 'passed' : 'failed';
     artifacts.finishedAt = new Date().toISOString();
-    await interviewPage.screenshot({ path: `${store.runDir}/final.png`, fullPage: true });
+    await captureCheckpointScreenshot(interviewPage, config, store, 'final.png');
     await interviewContext.close();
     return artifacts;
   } catch (error) {
@@ -134,6 +138,7 @@ export async function runAutomation(config, store) {
       message: error.message,
       stack: error.stack
     };
+    await captureFailureScreenshot(browser, config, store);
     artifacts.finishedAt = new Date().toISOString();
     throw Object.assign(error, { artifacts });
   } finally {
@@ -182,9 +187,7 @@ async function runFactLabelingSmoke({ browser, config, store, artifacts, synthet
   if (!stage) throw new Error(`Unknown fact labeling smoke-test stage: ${config.run.factRatingStage}`);
 
   recordStage(artifacts, stage.label, 'started', artifacts.case.commonGroundId);
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  await login(page, config, stage.actorRole);
+  const { context, page } = await newAuthenticatedPage(browser, config, stage.actorRole);
   if (stage.actorRole === 'participant') await openCaseAsParticipant(page, config, artifacts.case, syntheticCase);
   else await openCaseAsRequestor(page, config, artifacts.case, syntheticCase);
 
@@ -213,7 +216,7 @@ async function runFactLabelingSmoke({ browser, config, store, artifacts, synthet
   artifacts.finalUrl = page.url();
   artifacts.finalVisibleText = await readVisibleBodyText(page);
   recordStage(artifacts, stage.label, 'passed', 'All facts labeled and submitted.');
-  await page.screenshot({ path: `${store.runDir}/fact-labeling-smoke-final.png`, fullPage: true });
+  await captureCheckpointScreenshot(page, config, store, 'fact-labeling-smoke-final.png');
   await context.close();
   artifacts.finishedAt = new Date().toISOString();
   return artifacts;
@@ -251,7 +254,8 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     foundation: config.run.scenarioFoundation,
     alignmentScenarioId: config.run.alignmentScenarioId,
     behaviorSchedule: config.run.behaviorSchedule,
-    seed: config.run.scenarioSeed || store.runId
+    seed: config.run.scenarioSeed || store.runId,
+    actorPersonaByRole: actorPersonaByRole(config)
   });
   const selectedScenario = config.run.scenarioFoundation.alignmentScenarios.scenarios
     .find((scenario) => scenario.id === config.run.alignmentScenarioId);
@@ -265,32 +269,29 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     scenario: selectedScenario,
     kind: 'cross'
   });
-  // Start dossier generation concurrently with browser setup. The dossier is only
-  // needed once the first interview begins (create-case and accept-invitation do
-  // not use it), so overlapping it with that browser work hides most of its
-  // latency. This changes ONLY timing — the dossier content is unchanged.
-  recordStage(artifacts, 'Generate Scenario Dossiers', 'started');
-  const dossiersPromise = generateScenarioDossiers({
-    llm: config.llm,
+  // Start dossier preparation concurrently with browser setup. In fresh mode
+  // this generates a new dossier; in auto/cached modes it may return a matching
+  // saved dossier immediately.
+  recordStage(artifacts, 'Prepare Scenario Dossiers', 'started', `mode ${config.run.dossierMode ?? 'fresh'}`);
+  const dossiersPromise = loadOrGenerateScenarioDossiers({
+    config,
+    store,
     topic: config.run.scenarioFoundation.topic,
     scenario: selectedScenario,
-    seed: `${store.runId}:${syntheticCase.reference}`
+    syntheticCase,
+    artifacts
   });
   // Avoid an unhandled rejection if browser setup throws before we await it.
   dossiersPromise.catch(() => {});
 
   recordStage(artifacts, 'Create case', 'started');
-  const requestorSetupContext = await browser.newContext();
-  const requestorSetupPage = await requestorSetupContext.newPage();
-  await login(requestorSetupPage, config, 'requestor');
+  const { context: requestorSetupContext, page: requestorSetupPage } = await newAuthenticatedPage(browser, config, 'requestor');
   artifacts.case = await createCase(requestorSetupPage, config, syntheticCase);
   await requestorSetupContext.close();
   recordStage(artifacts, 'Create case', 'passed', artifacts.case?.commonGroundId ?? artifacts.case?.syntheticReference ?? '');
 
   recordStage(artifacts, 'Accept participant invitation', 'started');
-  const participantSetupContext = await browser.newContext();
-  const participantSetupPage = await participantSetupContext.newPage();
-  await login(participantSetupPage, config, 'participant');
+  const { context: participantSetupContext, page: participantSetupPage } = await newAuthenticatedPage(browser, config, 'participant');
   await acceptCaseRequest(participantSetupPage, config, syntheticCase, artifacts.case);
   await participantSetupContext.close();
   recordStage(artifacts, 'Accept participant invitation', 'passed');
@@ -306,9 +307,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   // Steps 3-4: Participant interview, then Participant fact section.
   // Open the participant's case page BEFORE awaiting the dossier, so a real
   // window stays visible during the dossier wait instead of a blank one.
-  const participantContext = await browser.newContext();
-  const participantPage = await participantContext.newPage();
-  await login(participantPage, config, 'participant');
+  const { context: participantContext, page: participantPage } = await newAuthenticatedPage(browser, config, 'participant');
   await openCaseAsParticipant(participantPage, config, artifacts.case, syntheticCase);
 
   // D8: click into Getting Started as soon as its link is available on the Case
@@ -337,9 +336,9 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   await store.writeJson('scenario-expression-plan.json', dossiers.scenarioExpressionPlan);
   recordStage(
     artifacts,
-    'Generate Scenario Dossiers',
+    'Prepare Scenario Dossiers',
     'passed',
-    `${dossiers.employee.canonicalProfile.employeeRole}; ${dossiers.scenarioExpressionPlan.questionExpressions.length} question relationships; fresh case seed ${dossiers.caseSeed}; pair audit warnings ${dossiers.pairValidation?.warnings?.length ?? 0}.`
+    `${dossiers.employee.canonicalProfile.employeeRole}; ${dossiers.scenarioExpressionPlan.questionExpressions.length} question relationships; ${dossiers.cacheSource ?? 'fresh'} dossier seed ${dossiers.caseSeed}; pair audit warnings ${dossiers.pairValidation?.warnings?.length ?? 0}.`
   );
   artifacts.scenarioPlan = scenarioController.getPlan();
   artifacts.alignmentScenarioId = config.run.alignmentScenarioId;
@@ -359,15 +358,13 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   recordStage(artifacts, 'Participant Fact Section', 'started');
   await completeActorPostProcessing(participantPage, config, artifacts, 'Participant', ownFactLabel);
   recordStage(artifacts, 'Participant Fact Section', 'passed', `All fact statements labeled ${ownFactLabel}.`);
-  await participantPage.screenshot({ path: `${store.runDir}/participant-post-processing.png`, fullPage: true });
+  await captureCheckpointScreenshot(participantPage, config, store, 'participant-post-processing.png');
   await participantContext.close();
 
   // Steps 5-8: Requestor rates the participant's facts, waits for Getting Started
   // to become available, then does their own interview and fact section. One
   // requestor session covers all four steps.
-  const requestorContext = await browser.newContext();
-  const requestorPage = await requestorContext.newPage();
-  await login(requestorPage, config, 'requestor');
+  const { context: requestorContext, page: requestorPage } = await newAuthenticatedPage(browser, config, 'requestor');
   await openCaseAsRequestor(requestorPage, config, artifacts.case, syntheticCase);
 
   recordStage(artifacts, 'Requestor Rates Participant Facts', 'started');
@@ -384,7 +381,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     }
   );
   recordStage(artifacts, 'Requestor Rates Participant Facts', 'passed', `Participant facts labeled ${crossPartyFactLabel}.`);
-  await requestorPage.screenshot({ path: `${store.runDir}/requestor-rates-participant-facts.png`, fullPage: true });
+  await captureCheckpointScreenshot(requestorPage, config, store, 'requestor-rates-participant-facts.png');
 
   // Step 6: the Getting Started button does not appear immediately after rating;
   // re-open the case from the dashboard and poll until it is available.
@@ -407,14 +404,12 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   recordStage(artifacts, 'Requestor Fact Section', 'started');
   await completeActorPostProcessing(requestorPage, config, artifacts, 'Requestor', ownFactLabel);
   recordStage(artifacts, 'Requestor Fact Section', 'passed', `All fact statements labeled ${ownFactLabel}.`);
-  await requestorPage.screenshot({ path: `${store.runDir}/requestor-post-processing.png`, fullPage: true });
+  await captureCheckpointScreenshot(requestorPage, config, store, 'requestor-post-processing.png');
   await requestorContext.close();
 
   // Step 9: Participant rates the requestor's facts.
   recordStage(artifacts, 'Participant Rates Requestor Facts', 'started');
-  const participantReviewContext = await browser.newContext();
-  const participantReviewPage = await participantReviewContext.newPage();
-  await login(participantReviewPage, config, 'participant');
+  const { context: participantReviewContext, page: participantReviewPage } = await newAuthenticatedPage(browser, config, 'participant');
   await openCaseAsParticipant(participantReviewPage, config, artifacts.case, syntheticCase);
   await completeParticipantFactReview(
     participantReviewPage,
@@ -423,18 +418,16 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     crossPartyFactLabel
   );
   recordStage(artifacts, 'Participant Rates Requestor Facts', 'passed', `Requestor facts labeled ${crossPartyFactLabel}.`);
-  await participantReviewPage.screenshot({ path: `${store.runDir}/participant-rates-requestor-facts.png`, fullPage: true });
+  await captureCheckpointScreenshot(participantReviewPage, config, store, 'participant-rates-requestor-facts.png');
   await participantReviewContext.close();
 
   artifacts.workflowCompleted = true;
   artifacts.workflowCompletionStage = 'Participant Rates Requestor Facts';
 
   recordStage(artifacts, 'Alignment Report', 'started');
-  const reportContext = await browser.newContext();
-  const reportPage = await reportContext.newPage();
+  const { context: reportContext, page: reportPage } = await newAuthenticatedPage(browser, config, 'requestor');
   let alignmentReportIssue = null;
   try {
-    await login(reportPage, config, 'requestor');
     await openCaseAsRequestor(reportPage, config, artifacts.case, syntheticCase);
     const alignmentReportConfig = {
       ...config,
@@ -452,7 +445,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
       artifacts.alignmentReport.expectedRange
     );
     recordStage(artifacts, 'Alignment Report', 'passed', alignmentReport.score === null ? 'Score not detected.' : `Score ${alignmentReport.score}.`);
-    await reportPage.screenshot({ path: `${store.runDir}/alignment-report.png`, fullPage: true });
+    await captureCheckpointScreenshot(reportPage, config, store, 'alignment-report.png');
   } catch (error) {
     alignmentReportIssue = {
       type: 'alignment_report_availability',
@@ -505,6 +498,89 @@ function recordStage(artifacts, name, status, detail = '') {
   });
 }
 
+async function captureCheckpointScreenshot(page, config, store, fileName) {
+  if ((config.run.screenshotMode ?? 'failures_only') !== 'all') return;
+  await page.screenshot({ path: `${store.runDir}/${fileName}`, fullPage: true });
+}
+
+async function captureFailureScreenshot(browser, config, store) {
+  const mode = config.run.screenshotMode ?? 'failures_only';
+  if (mode === 'none') return;
+  const contexts = browser.contexts().slice().reverse();
+  for (const context of contexts) {
+    const pages = context.pages().slice().reverse();
+    for (const page of pages) {
+      if (page.isClosed()) continue;
+      await page.screenshot({ path: `${store.runDir}/failure.png`, fullPage: true }).catch(() => {});
+      return;
+    }
+  }
+}
+
+async function loadOrGenerateScenarioDossiers({ config, store, topic, scenario, syntheticCase, artifacts }) {
+  const mode = config.run.dossierMode ?? 'fresh';
+  const variationPrompt = String(config.run.dossierVariationPrompt ?? '').trim();
+  const cacheKey = scenarioDossierCacheKey({ config, topic, scenario, variationPrompt });
+  const cachePath = path.join(config.rootDir, '.cache', 'scenario-dossiers', `${cacheKey}.json`);
+  artifacts.scenarioDossierCache = {
+    mode,
+    key: cacheKey,
+    path: cachePath,
+    variationPrompt
+  };
+
+  if (mode !== 'fresh' && fsSync.existsSync(cachePath)) {
+    console.log(`Scenario dossier cache hit: ${cacheKey}`);
+    const cached = JSON.parse(await fs.readFile(cachePath, 'utf8'));
+    return {
+      ...cached,
+      cacheSource: 'cache_hit',
+      cacheKey
+    };
+  }
+
+  if (mode === 'cached') {
+    throw new Error(`Scenario dossier cache miss for key ${cacheKey}. Select "Create fresh dossier" or "Reuse matching dossier when available" to generate one.`);
+  }
+
+  const seed = mode === 'auto'
+    ? `cached:${cacheKey}`
+    : `${store.runId}:${syntheticCase.reference}`;
+  console.log(`Generating ${mode === 'auto' ? 'cacheable' : 'fresh'} scenario dossier with seed ${seed}.`);
+  const dossiers = await generateScenarioDossiers({
+    llm: config.llm,
+    topic,
+    scenario,
+    seed,
+    variationPrompt
+  });
+  const payload = {
+    ...dossiers,
+    cacheSource: mode === 'auto' ? 'cache_miss_generated' : 'fresh_generated',
+    cacheKey
+  };
+  if (mode === 'auto') {
+    await fs.mkdir(path.dirname(cachePath), { recursive: true });
+    await fs.writeFile(cachePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+    console.log(`Scenario dossier cached: ${cacheKey}`);
+  }
+  return payload;
+}
+
+function scenarioDossierCacheKey({ config, topic, scenario, variationPrompt }) {
+  const stable = {
+    schemaVersion: topic?.schemaVersion ?? 2,
+    caseType: config.run.caseType,
+    topicId: topic?.topicId,
+    alignmentScenarioId: scenario?.id,
+    scenarioRatings: scenario?.ratings,
+    interviewStartActor: config.run.interviewStartActor ?? 'employee',
+    scriptedAnswersPath: config.run.scriptedAnswersPath ?? '',
+    variationPrompt
+  };
+  return crypto.createHash('sha256').update(JSON.stringify(stable)).digest('hex').slice(0, 24);
+}
+
 function existingCaseFromConfig(config, syntheticCase) {
   const commonGroundId = normalizeCaseId(config.run.existingCaseId);
   if (!commonGroundId) {
@@ -539,6 +615,37 @@ async function login(page, config, role) {
   await waitForIdle(page);
   await assertLoggedIn(page, config, role);
   await verifyAuthenticatedRoute(page, config, role);
+}
+
+async function newAuthenticatedPage(browser, config, role) {
+  if (config.run.reuseAuthState !== false) {
+    const storageStatePath = authStorageStatePath(config, role);
+    if (fsSync.existsSync(storageStatePath)) {
+      const context = await browser.newContext({ storageState: storageStatePath });
+      const page = await context.newPage();
+      try {
+        await verifyAuthenticatedRoute(page, config, role);
+        return { context, page, reusedAuthState: true };
+      } catch {
+        await context.close().catch(() => {});
+      }
+    }
+  }
+
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await login(page, config, role);
+  if (config.run.reuseAuthState !== false) {
+    const storageStatePath = authStorageStatePath(config, role);
+    await fs.mkdir(path.dirname(storageStatePath), { recursive: true });
+    await context.storageState({ path: storageStatePath }).catch(() => {});
+  }
+  return { context, page, reusedAuthState: false };
+}
+
+function authStorageStatePath(config, role) {
+  const urlKey = crypto.createHash('sha1').update(config.productionUrl).digest('hex').slice(0, 10);
+  return path.join(config.rootDir, '.tmp', 'auth-state', `${urlKey}-${role}.json`);
 }
 
 async function logout(page, config) {
@@ -714,11 +821,12 @@ async function runPartnerAiInterview(page, config, transcript, options = {}) {
     // by actor. Matching reuses the same fuzzy matcher as scenario turns, with a
     // sequential fallback when the live prompt can't be matched confidently.
     const scriptedSelection = scriptedAnswers
-      ? selectScriptedAnswer({ config, scriptedAnswers, scenarioTurn, latestPrompt, actorRole: options.actorRole, answeredScriptedQuestions })
+      ? selectScriptedAnswer({ config, scriptedAnswers, scenarioTurn, latestPrompt, actorRole: options.actorRole, actorPersona: actorPersonaForRole(config, options.actorRole), answeredScriptedQuestions })
       : null;
 
     const responseContext = {
       actorRole: options.actorRole ?? 'requestor',
+      actorPersona: actorPersonaForRole(config, options.actorRole),
       topic: config.run.topic,
       testBehaviorPolicy: config.run.testBehaviorPolicy,
       qualityCriteria: config.run.qualityCriteria,
@@ -945,10 +1053,48 @@ function buildScenarioTurn(controller, actor, latestPrompt) {
   };
 }
 
+function actorPersonaByRole(config) {
+  const firstPersona = config.run.interviewStartActor === 'manager' ? 'manager' : 'employee';
+  const secondPersona = firstPersona === 'employee' ? 'manager' : 'employee';
+  if (config.run.workflowScope === 'requestor') {
+    return {
+      requestor: firstPersona,
+      participant: secondPersona
+    };
+  }
+  return {
+    participant: firstPersona,
+    requestor: secondPersona
+  };
+}
+
+function actorPersonaForRole(config, actorRole = 'requestor') {
+  return actorPersonaByRole(config)[actorRole] ?? 'employee';
+}
+
+// A live prompt is a "primary question" turn when the newest Partner AI chat
+// message carries the primary-question format: a "Please cover:" guidance list.
+// Follow-up probes never include one. The prompt text contains the whole chat
+// history (older primary questions included), so only the text after the last
+// message timestamp is examined; the first prompt of an interview has no
+// timestamps yet, so the whole text is checked instead.
+function isPrimaryQuestionPrompt(latestPrompt) {
+  const text = String(latestPrompt ?? '');
+  const timestamps = [...text.matchAll(/\b\d{1,2}:\d{2}\s?[AP]M\b/g)];
+  const newestMessage = timestamps.length ? text.slice(timestamps[timestamps.length - 1].index) : text;
+  return /Please cover:/i.test(newestMessage);
+}
+
 // Resolves the scripted answer (if any) for the current turn. Returns null when
 // the turn should be answered by the normal responder (follow-up, unmatched
 // prompt with no fallback left, or no scripted answer for this actor/question).
-function selectScriptedAnswer({ config, scriptedAnswers, scenarioTurn, latestPrompt, actorRole, answeredScriptedQuestions }) {
+function selectScriptedAnswer({ config, scriptedAnswers, scenarioTurn, latestPrompt, actorRole, actorPersona, answeredScriptedQuestions }) {
+  // Scripted answers are reserved for primary questions. Without this gate,
+  // follow-up probes can consume them — via the sequential fallback or a loose
+  // fuzzy match — leaving the real primary question to the terse LLM fallback,
+  // which Partner AI may reject and re-ask indefinitely (case CG-0347).
+  if (!isPrimaryQuestionPrompt(latestPrompt)) return null;
+
   const topic = config.run.scenarioFoundation?.topic;
   let primaryQuestionId = scenarioTurn?.primaryQuestionId ?? null;
   let matchConfidence = primaryQuestionId ? 'fuzzy' : null;
@@ -978,7 +1124,7 @@ function selectScriptedAnswer({ config, scriptedAnswers, scenarioTurn, latestPro
 
   if (!primaryQuestionId || answeredScriptedQuestions.has(primaryQuestionId)) return null;
 
-  const text = pickScriptedAnswer(scriptedAnswers, primaryQuestionId, actorRole ?? 'requestor');
+  const text = pickScriptedAnswer(scriptedAnswers, primaryQuestionId, actorRole ?? 'requestor', actorPersona);
   if (!text) return null;
 
   answeredScriptedQuestions.add(primaryQuestionId);
@@ -2402,9 +2548,7 @@ export async function readAlignmentReportForExistingCase(config, { caseId, caseT
   };
   const browser = await chromium.launch(alignmentConfig.browser);
   try {
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    await login(page, alignmentConfig, 'requestor');
+    const { context, page } = await newAuthenticatedPage(browser, alignmentConfig, 'requestor');
 
     const createdCase = { id: caseId, commonGroundId: caseId, requireExactCaseMatch: true };
     const syntheticCase = { caseType: caseType ?? alignmentConfig.run.caseType };
@@ -2434,6 +2578,7 @@ export const workflowTestSupport = {
   matchScenarioQuestion,
   matchScenarioCriterion,
   selectScriptedAnswer,
+  isPrimaryQuestionPrompt,
   evaluateExpectedPartnerBehavior,
   interviewReadySignal,
   excerptReviewReady,

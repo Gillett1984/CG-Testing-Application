@@ -18,6 +18,11 @@ async function main() {
   if (config.run.runMode === 'full_workflow') {
     console.log(`Alignment scenario: ${config.run.alignmentScenarioId}`);
     console.log(`Behavior schedule: ${config.run.behaviorSchedule?.name ?? config.run.behaviorSchedulePath}`);
+    console.log(`Interview starts with: ${config.run.interviewStartActor}`);
+    console.log(`Scenario dossier mode: ${config.run.dossierMode}`);
+    if (config.run.dossierVariationPrompt) console.log(`Scenario dossier variation: ${config.run.dossierVariationPrompt}`);
+    console.log(`Screenshots: ${config.run.screenshotMode}`);
+    console.log(`Reuse auth state: ${config.run.reuseAuthState ? 'yes' : 'no'}`);
     console.log(`Post-processing wait: ${Math.round(config.run.postCompletionWaitMs / 60000)} minutes per stage`);
   }
   if (config.run.existingCaseId) console.log(`Existing case ID: ${config.run.existingCaseId}`);
@@ -32,6 +37,11 @@ async function main() {
     runMode: config.run.runMode,
     existingCaseId: config.run.existingCaseId,
     workflowScope: config.run.workflowScope,
+    interviewStartActor: config.run.interviewStartActor,
+    dossierMode: config.run.dossierMode,
+    dossierVariationPrompt: config.run.dossierVariationPrompt,
+    screenshotMode: config.run.screenshotMode,
+    reuseAuthState: config.run.reuseAuthState,
     numberOfCases: config.run.numberOfCases,
     stopOnFailure: config.run.stopOnFailure,
     qualityCriteriaPath: config.run.qualityCriteriaPath,
@@ -125,6 +135,11 @@ function buildRunReport(config, summary) {
     `Run Mode: ${formatRunMode(config.run.runMode)}`,
     `Existing Case ID: ${config.run.existingCaseId ?? ''}`,
     `Fact Labeling Stage: ${config.run.factRatingStage ?? ''}`,
+    `Interview Starts With: ${config.run.interviewStartActor ?? 'employee'}`,
+    `Scenario Dossier Mode: ${config.run.dossierMode ?? 'fresh'}`,
+    `Scenario Dossier Variation Prompt: ${config.run.dossierVariationPrompt ?? ''}`,
+    `Screenshots: ${config.run.screenshotMode ?? 'failures_only'}`,
+    `Reuse Auth State: ${config.run.reuseAuthState !== false ? 'yes' : 'no'}`,
     `Number Of Cases: ${config.run.numberOfCases}`,
     `Max Conversation Turns: ${config.run.maxTurns}`,
     `Batch Failure Behavior: ${config.run.stopOnFailure ? 'Stop on failure' : 'Continue batch'}`,

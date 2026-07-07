@@ -15,7 +15,8 @@ export function createScenarioController({
   foundation,
   alignmentScenarioId,
   behaviorSchedule = foundation?.defaultBehaviorSchedule,
-  seed
+  seed,
+  actorPersonaByRole
 }) {
   if (!foundation?.topic || !foundation?.alignmentScenarios || !foundation?.behaviorCatalog) {
     throw new Error('A validated scenario foundation is required.');
@@ -46,16 +47,18 @@ export function createScenarioController({
     plan,
     topic: foundation.topic,
     scenario,
-    behaviorCatalog: foundation.behaviorCatalog
+    behaviorCatalog: foundation.behaviorCatalog,
+    actorPersonaByRole
   });
 }
 
 export class ScenarioController {
-  constructor({ plan, topic, scenario, behaviorCatalog }) {
+  constructor({ plan, topic, scenario, behaviorCatalog, actorPersonaByRole = null }) {
     this.plan = structuredClone(plan);
     this.topic = topic;
     this.scenario = scenario;
     this.behaviorCatalog = behaviorCatalog;
+    this.actorPersonaByRole = normalizeActorPersonaMap(actorPersonaByRole);
     this.behaviorProgress = new Map(
       this.plan.behaviors.map((assignment) => [behaviorAssignmentKey(assignment), {
         status: 'pending',
@@ -150,7 +153,9 @@ export class ScenarioController {
 
     const termIds = criterion?.termIds ?? [question.primaryTermId];
     const termIdSet = new Set(termIds);
-    const actorDossier = actor === 'requestor' ? this.dossiers?.employee : this.dossiers?.manager;
+    const persona = this.actorPersonaByRole[actor] ?? actor;
+    const scenarioActor = persona === 'employee' ? 'requestor' : 'participant';
+    const actorDossier = persona === 'employee' ? this.dossiers?.employee : this.dossiers?.manager;
     const scenarioExpression = this.dossiers?.scenarioExpressionPlan?.questionExpressions
       ?.find((item) => item.primaryQuestionId === primaryQuestionId);
     // Scope the neutral evidence packet to this question's term(s) so each turn's
@@ -180,9 +185,9 @@ export class ScenarioController {
         const sharedEvent = this.plan.sharedEvents.find((item) => item.termId === termId);
         return {
           ...structuredClone(term),
-          ratingId: this.scenario.ratings[actor][termId],
+          ratingId: this.scenario.ratings[scenarioActor][termId],
           sharedEvent: structuredClone(sharedEvent),
-          interpretation: structuredClone(sharedEvent.actorInterpretations[actor])
+          interpretation: structuredClone(sharedEvent.actorInterpretations[scenarioActor])
         };
       })
     };
@@ -692,4 +697,10 @@ function deferredAnswerKey(actor, scheduleItemId) {
 
 function retainedFactKey(actor, factId) {
   return `${actor}:${factId}`;
+}
+
+function normalizeActorPersonaMap(value) {
+  const requestor = value?.requestor === 'manager' ? 'manager' : 'employee';
+  const participant = value?.participant === 'employee' ? 'employee' : 'manager';
+  return { requestor, participant };
 }
