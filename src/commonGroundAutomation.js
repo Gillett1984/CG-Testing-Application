@@ -65,6 +65,7 @@ export async function runAutomation(config, store) {
       const participantResult = await runPartnerAiInterview(participantInterviewPage, config, participantTranscript, {
         seed: `${artifacts.case.commonGroundId ?? store.runId}:participant`,
         actorRole: 'participant',
+        runDir: store.runDir,
         scriptedAnswers: config.run.scriptedAnswers
       });
       artifacts.participantGettingStarted = participantResult;
@@ -108,6 +109,7 @@ export async function runAutomation(config, store) {
     const requestorResult = await runPartnerAiInterview(interviewPage, config, requestorTranscript, {
       seed: artifacts.case?.commonGroundId ?? artifacts.case?.syntheticReference ?? store.runId,
       actorRole: 'requestor',
+      runDir: store.runDir,
       scriptedAnswers: config.run.scriptedAnswers
     });
     updateArtifactCaseId(artifacts, findCaseIdInText(JSON.stringify(requestorTranscript)));
@@ -349,6 +351,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     seed: `${artifacts.case?.commonGroundId ?? store.runId}:participant`,
     actorRole: 'participant',
     scenarioController,
+    runDir: store.runDir,
     scriptedAnswers: config.run.scriptedAnswers,
     artifacts
   });
@@ -405,6 +408,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     seed: `${artifacts.case?.commonGroundId ?? store.runId}:requestor`,
     actorRole: 'requestor',
     scenarioController,
+    runDir: store.runDir,
     scriptedAnswers: config.run.scriptedAnswers,
     artifacts
   });
@@ -673,6 +677,50 @@ async function startGettingStarted(page, config, createdCase) {
   await page.waitForTimeout(2000);
 }
 
+class PromptLoopError extends Error {
+  constructor(prompt, count) {
+    super(`Partner AI repeated the same primary question ${count} times without advancing — aborting to avoid an infinite interview loop.`);
+    this.name = 'PromptLoopError';
+    this.repeatedPrompt = String(prompt ?? '');
+    this.repeatCount = count;
+  }
+}
+
+// Two prompts count as "the same" for the loop guard when their normalized
+// primary-question text is identical or >=95% similar (small QFI-nudge edits
+// still count as a repeat). Cheap early-outs keep the happy path near-zero cost.
+function isSameRepeatedPrompt(a, b) {
+  const x = normalizeLoopPrompt(a);
+  const y = normalizeLoopPrompt(b);
+  if (x === y) return true;
+  const longest = Math.max(x.length, y.length);
+  if (longest === 0) return true;
+  // A length gap over 5% already caps similarity below 95% — skip the O(n*m) work.
+  if (Math.abs(x.length - y.length) / longest > 0.05) return false;
+  return 1 - levenshteinDistance(x, y) / longest >= 0.95;
+}
+
+function normalizeLoopPrompt(value) {
+  return String(value ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function levenshteinDistance(a, b) {
+  if (a === b) return 0;
+  const n = b.length;
+  if (a.length === 0) return n;
+  if (n === 0) return a.length;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i += 1) {
+    const curr = [i];
+    for (let j = 1; j <= n; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    prev = curr;
+  }
+  return prev[n];
+}
+
 async function runPartnerAiInterview(page, config, transcript, options = {}) {
   // A first-run onboarding tour modal can overlay the Groundwork page and block
   // the response input; dismiss it before we wait for the interview to be ready.
@@ -685,16 +733,41 @@ async function runPartnerAiInterview(page, config, transcript, options = {}) {
   const scriptedAnswers = options.scriptedAnswers ?? null;
   const answeredScriptedQuestions = new Set();
 
+  // Loop-guard state: detect Partner AI re-asking the same primary question.
+  let lastLoopGuardQuestion = null;
+  let repeatedPromptCount = 0;
+
   for (let turn = 1; turn <= config.run.maxTurns; turn += 1) {
     const latestPrompt = await readLatestPrompt(page, config);
+    const promptContext = extractPromptContext(latestPrompt);
     if (participantFactRatingRequired(latestPrompt)) {
       throw new Error('Participant Getting Started is not available yet. Common Ground is requiring the participant to rate the requestor fact statements first. Complete the participant fact-statement rating for this case, then rerun Participant Getting Started mode.');
     }
+
+    // Abort if Partner AI re-asks the same primary question for 3 consecutive
+    // turns (e.g. every answer flagged QFI: Low) — otherwise we would generate
+    // new answers indefinitely. Compares only the primary-question text and
+    // resets the moment the question changes, so the happy path (a new question
+    // each turn) costs one cheap comparison.
+    const loopGuardQuestion = promptContext.primaryQuestion || promptContext.activeQuestion || latestPrompt;
+    repeatedPromptCount = (lastLoopGuardQuestion !== null && isSameRepeatedPrompt(lastLoopGuardQuestion, loopGuardQuestion))
+      ? repeatedPromptCount + 1
+      : 1;
+    lastLoopGuardQuestion = loopGuardQuestion;
+    if (repeatedPromptCount >= 3) {
+      console.log(`[loop-guard] Same prompt repeated ${repeatedPromptCount} times — aborting to avoid infinite loop.`);
+      const slug = String(options.actorRole ?? 'actor').toLowerCase().replace(/\s+/g, '-');
+      if (options.runDir) {
+        await page.screenshot({ path: `${options.runDir}/prompt-loop-${slug}.png`, fullPage: true }).catch(() => {});
+      }
+      throw new PromptLoopError(loopGuardQuestion, repeatedPromptCount);
+    }
+
     transcript.push({
       role: 'partnerAi',
       turn,
       text: latestPrompt,
-      promptContext: extractPromptContext(latestPrompt),
+      promptContext,
       at: new Date().toISOString()
     });
 
