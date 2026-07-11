@@ -9,20 +9,35 @@ export async function generatePartnerAiResponse(context) {
   throw new Error('OPENAI_API_KEY is required. The testing system no longer uses hardcoded fallback responses.');
 }
 
-export async function verifyOpenAiConnectivity(llm) {
+export async function verifyOpenAiConnectivity(llm, options = {}) {
   if (!llm?.apiKey) throw new Error('OPENAI_API_KEY is required before starting a production case.');
-  try {
-    await createChatCompletion(llm, {
-      messages: [{ role: 'user', content: 'Reply with OK.' }],
-      temperature: 0,
-      max_tokens: 4
-    });
-  } catch (error) {
-    const tlsHint = isTlsInterceptionError(error)
-      ? ` — TLS interception detected (e.g. Norton Web/Mail Shield re-signing HTTPS). Node must trust the intercepting root CA: NODE_EXTRA_CA_CERTS is currently ${process.env.NODE_EXTRA_CA_CERTS ? `"${process.env.NODE_EXTRA_CA_CERTS}"` : 'not set'}; expected cert at config/certs/norton-root.pem (launch via npm run ui / test:case / preflight so scripts/launch.js applies it — see config/certs/README.md).`
-      : '';
-    throw new Error(`OpenAI preflight failed before Common Ground case creation: ${describeError(error)}${tlsHint}`, { cause: error });
+  // The preflight is a one-time startup gate for a long run, so be patient with a
+  // transient network/API blip ("fetch failed", timeouts, ECONNRESET, 5xx). Retry
+  // over ~45s before giving up. TLS/cert-interception errors never self-resolve, so
+  // they fail fast on first occurrence (isTransientFetchError already excludes them).
+  const retryDelaysMs = options.retryDelaysMs ?? [10000, 15000, 20000];
+  let lastError = null;
+  for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
+    try {
+      await createChatCompletion(llm, {
+        messages: [{ role: 'user', content: 'Reply with OK.' }],
+        temperature: 0,
+        max_tokens: 4
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+      const roundsLeft = attempt < retryDelaysMs.length;
+      if (!roundsLeft || !isTransientFetchError(error)) break;
+      const waitMs = retryDelaysMs[attempt];
+      console.warn(`[preflight] OpenAI connectivity check failed (${describeError(error)}); retrying in ${Math.round(waitMs / 1000)}s (attempt ${attempt + 1} of ${retryDelaysMs.length + 1}).`);
+      await delay(waitMs);
+    }
   }
+  const tlsHint = isTlsInterceptionError(lastError)
+    ? ` — TLS interception detected (e.g. Norton Web/Mail Shield re-signing HTTPS). Node must trust the intercepting root CA: NODE_EXTRA_CA_CERTS is currently ${process.env.NODE_EXTRA_CA_CERTS ? `"${process.env.NODE_EXTRA_CA_CERTS}"` : 'not set'}; expected cert at config/certs/norton-root.pem (launch via npm run ui / test:case / preflight so scripts/launch.js applies it — see config/certs/README.md).`
+    : '';
+  throw new Error(`OpenAI preflight failed before Common Ground case creation: ${describeError(lastError)}${tlsHint}`, { cause: lastError });
 }
 
 export async function generateScenarioDossiers({ llm, topic, scenario, seed, variationPrompt = '' }) {
@@ -1897,8 +1912,12 @@ async function fetchWithDeadline(url, options, timeoutMs) {
 }
 
 function openAiRequestTimeoutMs() {
-  const configured = Number(process.env.OPENAI_REQUEST_TIMEOUT_MS ?? 60000);
-  return Number.isFinite(configured) ? Math.max(5000, configured) : 60000;
+  // Large startup prompts (neutral evidence packet, scenario dossiers) routinely
+  // need more than 60s, so default to 120s. Still overridable via
+  // OPENAI_REQUEST_TIMEOUT_MS. A timeout is a transient error, so createChatCompletion
+  // (4 tries) and generateValidatedDossier (2 tries) already retry with this window.
+  const configured = Number(process.env.OPENAI_REQUEST_TIMEOUT_MS ?? 120000);
+  return Number.isFinite(configured) ? Math.max(5000, configured) : 120000;
 }
 
 function delay(ms) {

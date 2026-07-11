@@ -83,6 +83,24 @@ export function loadConfig(args) {
     if (errors.length) {
       throw new Error(`Scripted answers file is invalid:\n - ${errors.join('\n - ')}`);
     }
+
+    // A scripted file may pin the alignment scenario so its cross-party fact labels
+    // come out correctly (e.g. an aligned file → "Confident Fact"). Validate the id
+    // against the topic catalog, and warn if a runConfig value is being overridden
+    // (the CG-0357 bug: aligned file silently paired with extremely_misaligned).
+    if (scriptedAnswers.alignmentScenarioId) {
+      const known = scenarioFoundation.alignmentScenarios.scenarios.some(
+        (scenario) => scenario.id === scriptedAnswers.alignmentScenarioId
+      );
+      if (!known) {
+        throw new Error(`Scripted answers file references unknown alignmentScenarioId "${scriptedAnswers.alignmentScenarioId}". Known scenarios: ${scenarioFoundation.alignmentScenarios.scenarios.map((scenario) => scenario.id).join(', ')}.`);
+      }
+      if (!cli.alignmentScenarioId
+        && runConfig.alignmentScenarioId
+        && runConfig.alignmentScenarioId !== scriptedAnswers.alignmentScenarioId) {
+        console.warn(`[scripted-answers] Overriding run-config alignment scenario "${runConfig.alignmentScenarioId}" with the scripted file's "${scriptedAnswers.alignmentScenarioId}". Pass --alignment-scenario to force a different one.`);
+      }
+    }
   }
 
   const requestedRunMode = cli.runMode
@@ -137,7 +155,8 @@ export function loadConfig(args) {
       qualityCriteriaPath,
       qualityCriteria,
       scenarioFoundation,
-      alignmentScenarioId: cli.alignmentScenarioId ?? runConfig.alignmentScenarioId ?? scenarioFoundation?.alignmentScenarios.scenarios[0]?.id ?? '',
+      // Precedence: CLI flag > scripted file > runConfig > topic default.
+      alignmentScenarioId: cli.alignmentScenarioId ?? scriptedAnswers?.alignmentScenarioId ?? runConfig.alignmentScenarioId ?? scenarioFoundation?.alignmentScenarios.scenarios[0]?.id ?? '',
       behaviorSchedulePath,
       behaviorSchedule,
       scriptedAnswersPath,

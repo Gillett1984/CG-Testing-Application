@@ -43,7 +43,10 @@
       "Bash(tee .tmp/eval-run5.log)",
       "Bash(NODE_TLS_REJECT_UNAUTHORIZED=0 node scripts/testFollowupPersona.js)",
       "Bash(tee .tmp/eval-run6.log)",
-      "Bash(tee .tmp/eval-run7.log)"
+      "Bash(tee .tmp/eval-run7.log)",
+      "Bash(python3 *)",
+      "Bash(git *)",
+      "Bash(awk 'NR>=1105 && NR<=1135' src/commonGroundAutomation.js)"
     ]
   }
 }

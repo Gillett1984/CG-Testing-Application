@@ -55,7 +55,14 @@ each primary question** for each actor instead of generating it. Enabled by
 with any `workflowScope`. Mechanics:
 
 - File format: `config/scripted-answers/*.json` — `{ schemaVersion, topicId,
-  answers: [{ primaryQuestionId, employee?, manager? }] }`. In the live app the
+  alignmentScenarioId?, answers: [{ primaryQuestionId, employee?, manager? }] }`.
+  The optional `alignmentScenarioId` pins the run's alignment scenario (validated
+  against `config/scenarios/alignment-scenarios.json`), which drives the
+  cross-party fact labels and the record-only expected range — e.g. an aligned
+  file sets `well_aligned_outstanding` so cross-facts label "Confident Fact"
+  instead of "Opinion". Precedence: `--alignment-scenario` CLI flag > scripted
+  file > runConfig > topic default; a runConfig override logs a warning. In the
+  live app the
   invited participant is the Employee (first-person self-evaluation) and the
   requestor who created the case is the Manager (third-person), so `employee` is
   used for the **participant** and `manager` for the **requestor** (see
