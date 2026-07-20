@@ -18,13 +18,15 @@ export function loadScriptedAnswers(rootDir, relativePath) {
   return scriptedAnswersSchema.parse(raw);
 }
 
-// In the live Common Ground performance-review flow the invited participant is
-// the Employee being reviewed (first-person self-evaluation) and the requestor
-// who created the case is the Manager (third-person assessment). So the
-// participant speaks with the employee answer and the requestor with the manager
-// answer.
+// In the live Common Ground performance-review flow the requestor who created the
+// case is the Employee being reviewed (first-person self-evaluation) and the invited
+// participant is the Manager (third-person assessment). Confirmed 2026-07-16 from
+// Common Ground's own interview prompts to the requestor ("what role responsibilities
+// should your performance be evaluated against?", "what results did you deliver?").
+// So the requestor speaks with the employee answer and the participant with the
+// manager answer.
 function actorAnswerKey(actorRole) {
-  return actorRole === 'participant' ? 'employee' : 'manager';
+  return actorRole === 'participant' ? 'manager' : 'employee';
 }
 
 // Returns the scripted answer string for an actor + primary question, or null

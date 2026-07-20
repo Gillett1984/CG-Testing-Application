@@ -1459,19 +1459,18 @@ function withBehaviorValidation(result, behaviorCheck = {}) {
   };
 }
 
-function resolveActorPerspective({ actorRole, scriptedMode }) {
-  // Perspective is fixed by the assigned actor role, not inferred per turn.
-  // In scripted-answers mode the live Common Ground role assignment applies: the
-  // invited participant is the employee doing a self-assessment (first person) and
-  // the requestor who created the case is the manager evaluating the employee
-  // (third person). This matches the scripted answer mapping in scriptedAnswers.js
-  // (participant = employee answer, requestor = manager answer).
-  if (scriptedMode) {
-    return actorRole === 'participant' ? 'employee_self_assessment' : 'manager_evaluating_employee';
-  }
-  // Scenario (non-scripted) mode keeps the original mapping, which mirrors the
-  // actor->dossier mapping hardcoded in scenarioController.js (requestor = employee
-  // positions, participant = manager positions).
+function resolveActorPerspective({ actorRole }) {
+  // Perspective is fixed by the assigned actor role, not inferred per turn. The
+  // requestor who created the case is the employee being reviewed (first person); the
+  // invited participant is the manager evaluating them (third person). Confirmed
+  // 2026-07-16 from Common Ground's own prompts, which ask the requestor about "your
+  // performance" and what "you delivered".
+  //
+  // Scripted mode previously inverted this, which fed the requestor third-person
+  // manager prose in reply to first-person questions and failed validation as
+  // off-target. Both modes now agree, so there is no mode split: this mirrors the
+  // actor->dossier mapping in scenarioController.js (requestor = employee positions)
+  // and the scripted answer mapping in scriptedAnswers.js (requestor = employee answer).
   return actorRole === 'participant' ? 'manager_evaluating_employee' : 'employee_self_assessment';
 }
 

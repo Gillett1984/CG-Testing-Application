@@ -297,29 +297,40 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   await participantSetupContext.close();
   recordStage(artifacts, 'Accept participant invitation', 'passed');
 
-  // New Common Ground order: the conversation is sequential and gated by
-  // requestor/participant role (participant = invitee, requestor = creator).
-  // The participant completes their interview + facts FIRST. Then the requestor
-  // rates the participant's facts, does their own interview + facts, and finally
-  // the participant rates the requestor's facts. Roles drive the order,
-  // independent of employee/manager.
+  // Common Ground order (confirmed manually on prod, 2026-07-16): the conversation is
+  // sequential and gated by requestor/participant role (requestor = creator,
+  // participant = invitee). The REQUESTOR completes their interview + facts FIRST; a
+  // participant who tries to start earlier is held at the "waiting on the other party"
+  // gate. The participant must then rate the requestor's facts BEFORE their own
+  // interview will open — Common Ground states this outright ("Before you can start the
+  // Getting Started conversation, you need to review and rate the fact statements
+  // submitted by the requestor"; see participantFactRatingRequired). The participant
+  // then does their interview + facts, and the requestor rates the participant's facts
+  // last. Roles drive the order, independent of employee/manager.
+  //
+  // This inverts the participant-first order used until 2026-07-16. Runs passed under
+  // that order through 2026-07-07 and failed consistently afterward with no relevant
+  // code change, so Common Ground appears to have tightened enforcement of a sequence
+  // it always intended. waitForInterviewReady's gate detection stays as the safety net
+  // if the order ever flips again.
   artifacts.case.requireExactCaseMatch = true;
 
-  // Steps 3-4: Participant interview, then Participant fact section.
-  // Open the participant's case page BEFORE awaiting the dossier, so a real
+  // Steps 3-4: Requestor interview, then Requestor fact section.
+  // Open the requestor's case page BEFORE awaiting the dossier, so a real
   // window stays visible during the dossier wait instead of a blank one.
-  const participantContext = await browser.newContext();
-  const participantPage = await participantContext.newPage();
-  await login(participantPage, config, 'participant');
-  await openCaseAsParticipant(participantPage, config, artifacts.case, syntheticCase);
+  const requestorContext = await browser.newContext();
+  const requestorPage = await requestorContext.newPage();
+  await login(requestorPage, config, 'requestor');
+  await openCaseAsRequestor(requestorPage, config, artifacts.case, syntheticCase);
 
   // D8: click into Getting Started as soon as its link is available on the Case
   // Details page — do NOT wait on the dossier first. ensureGettingStartedOpen
   // clicks the link the moment it is visible; the dossier then finishes while
   // Common Ground loads the interview page (it is only needed once we read the
   // first prompt and generate a response, just below).
-  recordStage(artifacts, 'Participant Getting Started', 'started');
-  await ensureGettingStartedOpen(participantPage, config, artifacts.case);
+  recordStage(artifacts, 'Requestor Getting Started', 'started');
+  await ensureGettingStartedOpen(requestorPage, config, artifacts.case);
+  updateArtifactCaseId(artifacts, await findCaseId(requestorPage));
 
   // The dossier is required before the first response is generated. The wait now
   // overlaps the Getting Started interview-page load instead of blocking on Case Details.
@@ -347,63 +358,6 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   artifacts.alignmentScenarioId = config.run.alignmentScenarioId;
   artifacts.behaviorScheduleId = config.run.behaviorSchedule.id;
 
-  const participantResult = await runPartnerAiInterview(participantPage, config, participantTranscript, {
-    seed: `${artifacts.case?.commonGroundId ?? store.runId}:participant`,
-    actorRole: 'participant',
-    scenarioController,
-    runDir: store.runDir,
-    scriptedAnswers: config.run.scriptedAnswers,
-    artifacts
-  });
-  artifacts.participantGettingStarted = participantResult;
-  recordStage(artifacts, 'Participant Getting Started', participantResult.passed ? 'passed' : 'failed', participantResult.stopReason);
-  if (!participantResult.passed) throw new Error(participantResult.stopReason);
-
-  recordStage(artifacts, 'Participant Fact Section', 'started');
-  await withOtherPartyGateRecovery(
-    {
-      page: participantPage, config, store, createdCase: artifacts.case,
-      actorLabel: 'Participant', waitName: 'Participant Fact Section', artifacts,
-      expectedStep: (t, u) => excerptReviewReady(t, u) || factLabelingReady(t, u)
-    },
-    () => completeActorPostProcessing(participantPage, config, artifacts, 'Participant', ownFactLabel)
-  );
-  recordStage(artifacts, 'Participant Fact Section', 'passed', `All fact statements labeled ${ownFactLabel}.`);
-  await participantPage.screenshot({ path: `${store.runDir}/participant-post-processing.png`, fullPage: true });
-  await participantContext.close();
-
-  // Steps 5-8: Requestor rates the participant's facts, waits for Getting Started
-  // to become available, then does their own interview and fact section. One
-  // requestor session covers all four steps.
-  const requestorContext = await browser.newContext();
-  const requestorPage = await requestorContext.newPage();
-  await login(requestorPage, config, 'requestor');
-  await openCaseAsRequestor(requestorPage, config, artifacts.case, syntheticCase);
-
-  recordStage(artifacts, 'Requestor Rates Participant Facts', 'started');
-  await withOtherPartyGateRecovery(
-    {
-      page: requestorPage, config, store, createdCase: artifacts.case,
-      actorLabel: 'Requestor', waitName: 'Requestor Rates Participant Facts', artifacts,
-      expectedStep: (t, u) => factLabelingReady(t, u) || /Rate (?:Participant|Request[eo]r)'?s Facts/i.test(t)
-    },
-    () => completeCrossPartyFactReview(requestorPage, config, artifacts.case, crossPartyFactLabel, {
-      raterRole: 'requestor',
-      ratedParty: 'participant',
-      linkText: /Rate Participant'?s Facts/i,
-      mode: 'requestor_rates_participant'
-    })
-  );
-  recordStage(artifacts, 'Requestor Rates Participant Facts', 'passed', `Participant facts labeled ${crossPartyFactLabel}.`);
-  await requestorPage.screenshot({ path: `${store.runDir}/requestor-rates-participant-facts.png`, fullPage: true });
-
-  // Step 6: the Getting Started button does not appear immediately after rating;
-  // re-open the case from the dashboard and poll until it is available.
-  await waitForRequestorGettingStarted(requestorPage, config, artifacts.case, syntheticCase);
-  await startGettingStarted(requestorPage, config, artifacts.case);
-  updateArtifactCaseId(artifacts, await findCaseId(requestorPage));
-
-  recordStage(artifacts, 'Requestor Getting Started', 'started');
   const requestorResult = await runPartnerAiInterview(requestorPage, config, requestorTranscript, {
     seed: `${artifacts.case?.commonGroundId ?? store.runId}:requestor`,
     actorRole: 'requestor',
@@ -429,26 +383,103 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   await requestorPage.screenshot({ path: `${store.runDir}/requestor-post-processing.png`, fullPage: true });
   await requestorContext.close();
 
-  // Step 9: Participant rates the requestor's facts.
+  // Steps 5-8: Participant rates the requestor's facts, waits for Getting Started
+  // to become available, then does their own interview and fact section. One
+  // participant session covers all four steps. The rating MUST precede the
+  // participant's interview: Common Ground will not open Getting Started until the
+  // requestor's fact statements have been rated.
+  const participantContext = await browser.newContext();
+  const participantPage = await participantContext.newPage();
+  await login(participantPage, config, 'participant');
+  await openCaseAsParticipant(participantPage, config, artifacts.case, syntheticCase);
+
   recordStage(artifacts, 'Participant Rates Requestor Facts', 'started');
-  const participantReviewContext = await browser.newContext();
-  const participantReviewPage = await participantReviewContext.newPage();
-  await login(participantReviewPage, config, 'participant');
-  await openCaseAsParticipant(participantReviewPage, config, artifacts.case, syntheticCase);
   await withOtherPartyGateRecovery(
     {
-      page: participantReviewPage, config, store, createdCase: artifacts.case,
+      page: participantPage, config, store, createdCase: artifacts.case,
       actorLabel: 'Participant', waitName: 'Participant Rates Requestor Facts', artifacts,
       expectedStep: (t, u) => factLabelingReady(t, u) || /Rate (?:Participant|Request[eo]r)'?s Facts/i.test(t)
     },
-    () => completeParticipantFactReview(participantReviewPage, config, artifacts.case, crossPartyFactLabel)
+    () => completeParticipantFactReview(participantPage, config, artifacts.case, crossPartyFactLabel)
   );
   recordStage(artifacts, 'Participant Rates Requestor Facts', 'passed', `Requestor facts labeled ${crossPartyFactLabel}.`);
-  await participantReviewPage.screenshot({ path: `${store.runDir}/participant-rates-requestor-facts.png`, fullPage: true });
-  await participantReviewContext.close();
+  await participantPage.screenshot({ path: `${store.runDir}/participant-rates-requestor-facts.png`, fullPage: true });
+
+  // Step 6: the Getting Started button does not appear immediately after rating;
+  // re-open the case from the dashboard and poll until it is available. No-op when
+  // completeParticipantFactReview already returned on a ready input (its
+  // allowGettingStartedReady path).
+  await waitForGettingStartedAfterRating(participantPage, config, artifacts.case, syntheticCase, 'Participant');
+
+  // Excerpt review is a post-INTERVIEW screen, so the participant cannot legitimately
+  // be on it here — their interview has not run yet. If it appears, Common Ground is in
+  // a state this sequence does not model; stop rather than let ensureGettingStartedOpen
+  // click a Getting Started link out of an unfinished review (gettingStartedAvailable
+  // is a whole-page text test and would not catch this on its own).
+  const participantPreInterviewText = await readVisibleBodyText(participantPage);
+  if (excerptReviewReady(participantPreInterviewText, participantPage.url())) {
+    const guardShot = `${store.runDir}/participant-unexpected-excerpt-review.png`;
+    await participantPage.screenshot({ path: guardShot, fullPage: true }).catch(() => {});
+    throw new Error(
+      'Participant is on the Excerpt Review screen before their Getting Started interview has run. '
+      + 'Excerpt review is a post-interview step, so Common Ground is in a state this workflow does not model; '
+      + 'stopping instead of clicking further. '
+      + `URL: ${participantPage.url()}. Screenshot: ${guardShot}.`
+    );
+  }
+  await ensureGettingStartedOpen(participantPage, config, artifacts.case);
+
+  recordStage(artifacts, 'Participant Getting Started', 'started');
+  const participantResult = await runPartnerAiInterview(participantPage, config, participantTranscript, {
+    seed: `${artifacts.case?.commonGroundId ?? store.runId}:participant`,
+    actorRole: 'participant',
+    scenarioController,
+    runDir: store.runDir,
+    scriptedAnswers: config.run.scriptedAnswers,
+    artifacts
+  });
+  artifacts.participantGettingStarted = participantResult;
+  recordStage(artifacts, 'Participant Getting Started', participantResult.passed ? 'passed' : 'failed', participantResult.stopReason);
+  if (!participantResult.passed) throw new Error(participantResult.stopReason);
+
+  recordStage(artifacts, 'Participant Fact Section', 'started');
+  await withOtherPartyGateRecovery(
+    {
+      page: participantPage, config, store, createdCase: artifacts.case,
+      actorLabel: 'Participant', waitName: 'Participant Fact Section', artifacts,
+      expectedStep: (t, u) => excerptReviewReady(t, u) || factLabelingReady(t, u)
+    },
+    () => completeActorPostProcessing(participantPage, config, artifacts, 'Participant', ownFactLabel)
+  );
+  recordStage(artifacts, 'Participant Fact Section', 'passed', `All fact statements labeled ${ownFactLabel}.`);
+  await participantPage.screenshot({ path: `${store.runDir}/participant-post-processing.png`, fullPage: true });
+  await participantContext.close();
+
+  // Step 9: Requestor rates the participant's facts.
+  recordStage(artifacts, 'Requestor Rates Participant Facts', 'started');
+  const requestorReviewContext = await browser.newContext();
+  const requestorReviewPage = await requestorReviewContext.newPage();
+  await login(requestorReviewPage, config, 'requestor');
+  await openCaseAsRequestor(requestorReviewPage, config, artifacts.case, syntheticCase);
+  await withOtherPartyGateRecovery(
+    {
+      page: requestorReviewPage, config, store, createdCase: artifacts.case,
+      actorLabel: 'Requestor', waitName: 'Requestor Rates Participant Facts', artifacts,
+      expectedStep: (t, u) => factLabelingReady(t, u) || /Rate (?:Participant|Request[eo]r)'?s Facts/i.test(t)
+    },
+    () => completeCrossPartyFactReview(requestorReviewPage, config, artifacts.case, crossPartyFactLabel, {
+      raterRole: 'requestor',
+      ratedParty: 'participant',
+      linkText: /Rate Participant'?s Facts/i,
+      mode: 'requestor_rates_participant'
+    })
+  );
+  recordStage(artifacts, 'Requestor Rates Participant Facts', 'passed', `Participant facts labeled ${crossPartyFactLabel}.`);
+  await requestorReviewPage.screenshot({ path: `${store.runDir}/requestor-rates-participant-facts.png`, fullPage: true });
+  await requestorReviewContext.close();
 
   artifacts.workflowCompleted = true;
-  artifacts.workflowCompletionStage = 'Participant Rates Requestor Facts';
+  artifacts.workflowCompletionStage = 'Requestor Rates Participant Facts';
 
   recordStage(artifacts, 'Alignment Report', 'started');
   const reportContext = await browser.newContext();
@@ -721,11 +752,55 @@ function levenshteinDistance(a, b) {
   return prev[n];
 }
 
+// Fast, clean failure when Getting Started is gated on the other party. Detection
+// lives in waitForInterviewReady (which throws OtherPartyGateError); this wrapper
+// turns that into a screenshot, a recorded soft assertion, and an error naming the
+// actor — instead of the 10-minute "did not become ready before timeout" that hides
+// the cause. Deliberately does NOT recover: this is the only stage that submits
+// interview turns, so re-running it could duplicate submissions. A gate here means
+// Common Ground wants the OTHER actor to act, which no retry in this session fixes.
 async function runPartnerAiInterview(page, config, transcript, options = {}) {
+  try {
+    return await runPartnerAiInterviewTurns(page, config, transcript, options);
+  } catch (error) {
+    if (!(error instanceof OtherPartyGateError)) throw error;
+
+    const actorLabel = capitalizeFirst(options.actorRole ?? 'actor');
+    const slug = String(options.actorRole ?? 'actor').toLowerCase().replace(/\s+/g, '-');
+    const screenshotPath = options.runDir ? `${options.runDir}/${slug}-interview-gate.png` : '(no runDir)';
+    if (options.runDir) {
+      await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
+    }
+
+    const submittedTurns = transcript.filter((entry) => entry.role === 'syntheticUser').length;
+    const position = submittedTurns === 0
+      ? 'before submitting any turn (Common Ground never let this actor start)'
+      : `after ${submittedTurns} submitted turn(s)`;
+
+    console.log(`[gate] ${actorLabel} Getting Started gated on the other party ${position}.`);
+    options.artifacts?.softAssertions.push({
+      type: 'workflow_interview_gate',
+      passed: false,
+      expected: `${actorLabel} can start and complete the Getting Started interview.`,
+      observed: `Gated at "waiting on the other party" during ${error.waitName} ${position}. Screenshot: ${screenshotPath}. URL: ${error.url}.`
+    });
+
+    const gateError = new Error(
+      `${actorLabel} Getting Started is blocked at the "waiting on the other party" gate ${position}. `
+      + 'Common Ground is sequencing this step behind the other actor, so the response input will never appear in this session. '
+      + `Screenshot: ${screenshotPath}.`
+    );
+    gateError.otherPartyGate = { actorLabel, waitName: error.waitName, screenshotPath, url: error.url };
+    throw gateError;
+  }
+}
+
+async function runPartnerAiInterviewTurns(page, config, transcript, options = {}) {
   // A first-run onboarding tour modal can overlay the Groundwork page and block
   // the response input; dismiss it before we wait for the interview to be ready.
+  const interviewStageName = `${capitalizeFirst(options.actorRole ?? 'actor')} Getting Started interview`;
   await dismissOnboardingTourModal(page);
-  await waitForInterviewReady(page, config);
+  await waitForInterviewReady(page, config, { stageName: interviewStageName });
 
   // Scripted-answers mode: which primary questions this actor has already
   // answered from the supplied script (so only the FIRST turn of each primary
@@ -879,7 +954,7 @@ async function runPartnerAiInterview(page, config, transcript, options = {}) {
 
     await responseInput.fill(response);
     await click(page, config.selectors.partnerAi.sendButton, 'Partner AI send');
-    await waitForInterviewReady(page, config);
+    await waitForInterviewReady(page, config, { stageName: interviewStageName });
 
     const visibleAfterResponse = await readVisibleBodyText(page);
     if (scenarioTurn?.behaviors?.length) {
@@ -2030,11 +2105,13 @@ async function dismissOnboardingTourModal(page) {
   return true;
 }
 
-async function waitForInterviewReady(page, config) {
+async function waitForInterviewReady(page, config, options = {}) {
   const inputSelector = config.selectors.partnerAi.responseInput;
+  const stageName = options.stageName ?? 'Getting Started interview';
   let deadline = Date.now() + 600000;
   let lastVisibleText = '';
   let lastInputState = '';
+  let gateSince = null;
 
   while (Date.now() < deadline) {
     // Cheap per-pass check: close the onboarding tour modal if it appears
@@ -2052,6 +2129,21 @@ async function waitForInterviewReady(page, config) {
     if (interviewReadySignal({ readyInput: Boolean(readyInput), visibleText })) {
       await waitForStableLocatorText(page.locator(config.selectors.partnerAi.latestPrompt).first(), page);
       return;
+    }
+    // Cross-party gate: Common Ground shows "waiting on the other party" when this
+    // actor's interview is sequenced behind the other side. The response input never
+    // appears, so polling to the full deadline burns 10 minutes and reports a generic
+    // timeout instead of the real cause. Confirmed over OTHER_PARTY_GATE_CONFIRM_MS to
+    // ignore transient frames, and checked only after the ready-input test above so a
+    // live interview always wins over the broad "almost there" match. Free on the happy
+    // path: visibleText is already read at the top of this loop.
+    if (otherPartyGate(visibleText)) {
+      if (!gateSince) gateSince = Date.now();
+      else if (Date.now() - gateSince >= OTHER_PARTY_GATE_CONFIRM_MS) {
+        throw new OtherPartyGateError(stageName, page.url(), visibleText);
+      }
+    } else {
+      gateSince = null;
     }
     // While Common Ground is visibly still processing the previous answer, keep
     // waiting instead of giving up: roll the deadline forward so an active
@@ -2276,11 +2368,11 @@ async function withOtherPartyGateRecovery(ctx, stageFn) {
   }
 }
 
-// After the requestor submits ratings of the participant's facts, the "Getting
-// Started" button does not appear immediately and the requestor may still be
-// behind a "waiting on the other party" gate. Re-open the case from the dashboard
-// and poll until an actionable Getting Started control is available.
-async function waitForRequestorGettingStarted(page, config, createdCase, syntheticCase) {
+// After an actor submits ratings of the other party's facts, the "Getting Started"
+// button does not appear immediately and the actor may still be behind a "waiting on
+// the other party" gate. Re-open the case from the dashboard and poll until an
+// actionable Getting Started control is available.
+async function waitForGettingStartedAfterRating(page, config, createdCase, syntheticCase, actorLabel = 'Requestor') {
   // Keep the full post-rating wait budget (Common Ground genuinely delays the
   // Getting Started button), but poll responsively and proceed the moment the
   // control is ready. The heavy dashboard re-open only runs periodically, since
@@ -2315,7 +2407,10 @@ async function waitForRequestorGettingStarted(page, config, createdCase, synthet
       await page.waitForTimeout(1500);
     }
   }
-  throw new Error('Requestor "Getting Started" did not become available after rating the participant\'s facts within the timeout. The participant Getting Started or fact rating may not have completed.');
+  throw new Error(
+    `${actorLabel} "Getting Started" did not become available after rating the other party's facts within the timeout. `
+    + "The other party's Getting Started or fact rating may not have completed."
+  );
 }
 
 async function waitForStableLocatorText(locator, page) {

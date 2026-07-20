@@ -63,14 +63,16 @@ with any `workflowScope`. Mechanics:
   instead of "Opinion". Precedence: `--alignment-scenario` CLI flag > scripted
   file > runConfig > topic default; a runConfig override logs a warning. In the
   live app the
-  invited participant is the Employee (first-person self-evaluation) and the
-  requestor who created the case is the Manager (third-person), so `employee` is
-  used for the **participant** and `manager` for the **requestor** (see
-  `src/scriptedAnswers.js`, schema in `src/scenarioSchemas.js`). The LLM follow-up
-  perspective is flipped to match in scripted mode (`resolveActorPerspective` in
-  `src/llmResponder.js`), and scripted follow-ups are grounded in the transcript
-  rather than the scenario dossier so the interviewee's role stays consistent. The
-  example file documents the shape.
+  requestor who created the case is the Employee (first-person self-evaluation) and
+  the invited participant is the Manager (third-person), so `employee` is
+  used for the **requestor** and `manager` for the **participant** (see
+  `src/scriptedAnswers.js`, schema in `src/scenarioSchemas.js`). Confirmed 2026-07-16
+  from Common Ground's own prompts, which ask the requestor about "your performance"
+  and what "you delivered". The LLM follow-up
+  perspective uses this same mapping in both scripted and scenario modes
+  (`resolveActorPerspective` in `src/llmResponder.js`), and scripted follow-ups are
+  grounded in the transcript rather than the scenario dossier so the interviewee's
+  role stays consistent. The example file documents the shape.
 - The live Common Ground prompt is matched to a `primaryQuestionId` with the same
   fuzzy matcher used for scenario turns (`src/questionMatching.js`,
   `matchScenarioQuestionScored`). Manager questions mirror the employee questions,
