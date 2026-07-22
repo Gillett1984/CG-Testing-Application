@@ -1,9 +1,49 @@
 const PROMPT_LEAK_PATTERN = /\b(assigned rating|scenario requirement|test requirement|synthetic (?:test|data)|dossier|system prompt|user prompt)\b/i;
 
-export async function generateScenarioDossiers({ llm, topic, scenario, seed, completeJson }) {
+// Deterministic, caseNumber-keyed sector rotation. Not sourced from store.runId or
+// scenarioSeed. Pushes the invented role/industry/company away from the LLM's
+// default office/software roles that were repeating across cases.
+const ROLE_DOMAINS = [
+  'healthcare and clinical services',
+  'warehousing and logistics',
+  'hospitality and food service',
+  'manufacturing and skilled trades',
+  'education and training',
+  'financial services and insurance',
+  'agriculture and food production',
+  'retail and customer service',
+  'construction and infrastructure',
+  'nonprofit and community services',
+  'media, publishing, and creative production',
+  'energy, utilities, and environmental services',
+  'transportation and field operations',
+  'public sector and administration'
+];
+
+function buildRoleDiversity({ caseNumber, persona }) {
+  if (!caseNumber && !persona) return null;
+  const index = (Math.max(1, Number(caseNumber) || 1) - 1) % ROLE_DOMAINS.length;
+  const sector = ROLE_DOMAINS[index];
+  const workplaceCharacter = persona?.polish === 'crude'
+    ? 'an informal, hands-on frontline, field, or trades workplace'
+    : persona?.polish === 'professional'
+    ? 'a formal professional, corporate, or knowledge-work workplace'
+    : 'any plausible workplace';
+  return {
+    directive: `Set this case in the ${sector} sector; lean toward ${workplaceCharacter}. Invent a specific, fresh job title and a fictional employer native to that sector, clearly different from generic office, software-engineering, or marketing-coordinator roles used in other cases.`,
+    input: { sector, workplaceCharacter }
+  };
+}
+
+export async function generateScenarioDossiers({ llm, topic, scenario, seed, completeJson, caseNumber, persona }) {
   if (!llm?.apiKey) throw new Error('OPENAI_API_KEY is required to generate scenario dossiers.');
   if (typeof completeJson !== 'function') throw new Error('A JSON completion function is required to generate scenario dossiers.');
 
+  // Role diversity is keyed STRICTLY to caseNumber (never store.runId or scenarioSeed):
+  // a deterministic sector per case pushes the LLM off its default roles. Injected ONLY
+  // into the neutral evidence packet (the single origin of canonicalProfile), so both
+  // actor dossiers inherit the identical profile and validateSharedProfile still holds.
+  const roleDiversity = buildRoleDiversity({ caseNumber, persona });
   const topicInput = topicDescription(topic);
   const employeeRatings = ratingAssignments(topic, scenario.ratings.requestor);
   const managerRatings = ratingAssignments(topic, scenario.ratings.participant);
@@ -25,11 +65,13 @@ export async function generateScenarioDossiers({ llm, topic, scenario, seed, com
         'Do not make either viewpoint obviously irrational or unsupported.',
         'Include attribution ambiguity, consistency evidence, and independence evidence so opposite evaluations can remain grounded in identical facts.',
         'Use plain language and spell out abbreviations instead of relying on acronyms.',
-        'Do not mention testing, scenarios, dossiers, prompts, or assigned ratings.'
-      ].join(' '),
+        'Do not mention testing, scenarios, dossiers, prompts, or assigned ratings.',
+        roleDiversity?.directive
+      ].filter(Boolean).join(' '),
       input: {
         caseSeed: seed,
         actor: 'neutral',
+        roleDiversity: roleDiversity?.input ?? undefined,
         topic: topicInput,
         interpretiveRangeNeeded: pairRatings(employeeRatings, managerRatings),
         requiredShape: evidencePacketShapeDescription()
@@ -102,6 +144,7 @@ export async function generateScenarioDossiers({ llm, topic, scenario, seed, com
       return {
         schemaVersion: 2,
         caseSeed: seed,
+        roleDomain: roleDiversity?.input.sector ?? null,
         generatedAt: new Date().toISOString(),
         evidencePacket,
         scenarioExpressionPlan,

@@ -40,12 +40,14 @@ export async function verifyOpenAiConnectivity(llm, options = {}) {
   throw new Error(`OpenAI preflight failed before Common Ground case creation: ${describeError(lastError)}${tlsHint}`, { cause: lastError });
 }
 
-export async function generateScenarioDossiers({ llm, topic, scenario, seed }) {
+export async function generateScenarioDossiers({ llm, topic, scenario, seed, caseNumber, persona }) {
   return buildScenarioDossiers({
     llm,
     topic,
     scenario,
     seed,
+    caseNumber,
+    persona,
     completeJson: async (activeLlm, request) => {
       const text = await createChatCompletion(activeLlm, {
         messages: [
@@ -69,6 +71,7 @@ async function generateOpenAiResponse(context) {
   const promptContext = extractPromptContext(context.latestPrompt);
   const activeQualityCriteria = findRelevantCriteria(promptContext, context.qualityCriteria);
   const baseGenerationInput = buildGenerationInput(context, promptContext, activeQualityCriteria);
+  context.turnClassification = baseGenerationInput.turnClassification;
   if (context.scenarioTurn) {
     return generateScenarioComposedResponse(context, baseGenerationInput);
   }
@@ -262,6 +265,7 @@ function buildGenerationInput(context, promptContext, activeQualityCriteria) {
     activePrompt: promptContext,
     activeQualityCriteria,
     scenarioTurn: context.scenarioTurn ?? null,
+    persona: context.persona ?? null,
     turn: context.turn,
     priorSyntheticUserFacts: extractPriorUserFacts(context.transcript)
   };
@@ -943,6 +947,26 @@ function arrayOfStrings(value) {
   return value.map((item) => String(item ?? '').trim()).filter(Boolean);
 }
 
+function personaDirectives(persona, turnClassification) {
+  const lines = [
+    'Adopt this synthetic-user persona consistently for the whole interview.',
+    `Persona voice: ${persona.voice}`,
+    persona.polish === 'crude'
+      ? 'Register: rough and unpolished — casual grammar, blunt phrasing, fragments/run-ons are fine; do not sound corporate or carefully edited.'
+      : 'Register: polished and professional — correct grammar, clear structure, measured phrasing.'
+  ];
+  if (persona.detail === 'sparse') {
+    lines.push(turnClassification?.isFollowUpTurn
+      // Detail is released only once Partner AI has coaxed with a follow-up.
+      ? 'Partner AI has now followed up, so give the specific detail it asks for; coaxing has occurred and you may elaborate this turn.'
+      : 'Initial sparse answer: reply short and surface-level. Withhold specifics, numbers, names, examples, and metrics until Partner AI explicitly asks a follow-up. Do not volunteer detail or pre-empt questions.');
+  } else {
+    lines.push('This persona answers thoroughly: include concrete, contextually relevant specifics and examples without being asked.');
+  }
+  for (const habit of persona.writingHabits ?? []) lines.push(habit);
+  return lines;
+}
+
 function buildGenerationMessages(input, correction = null) {
   // High-quality primary-question turns must cover all mandatory answer-guidance
   // points in one go; vague/behavior-only/partial turns stay tight.
@@ -990,6 +1014,8 @@ function buildGenerationMessages(input, correction = null) {
     'When high-quality answer criteria are provided, satisfy all mandatory criteria only if the policyDecision or active maneuver asks for high-quality/full criteria coverage.',
     'Use varied wording across turns and across cases while preserving the requested test behavior.'
   ];
+
+  if (input.persona) systemContent.push(...personaDirectives(input.persona, input.turnClassification));
 
   if (input.scenarioTurn) {
     systemContent.push(
@@ -1739,6 +1765,12 @@ function parseValidationResult(rawText) {
 function responseTokenBudget(input, isRetry = false) {
   const planMode = input.activeManeuver?.responsePlan?.mode;
   const style = `${input.activeManeuver?.responseStyle ?? ''} ${planMode ?? ''}`.toLowerCase();
+
+  // Sparse persona: mechanically cap initial/non-follow-up turns so detail
+  // physically cannot be emitted until Partner AI coaxes (isFollowUpTurn).
+  if (input.persona?.detail === 'sparse' && !input.turnClassification?.isFollowUpTurn) {
+    return isRetry ? 110 : 80;
+  }
 
   // Tight tiers for non-substantive turns.
   if (/partial/.test(style)) return isRetry ? 180 : 150;

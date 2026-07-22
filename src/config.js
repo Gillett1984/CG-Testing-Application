@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import { z } from 'zod';
 import { loadBehaviorSchedule, loadScenarioFoundation } from './scenarioConfig.js';
 import { loadScriptedAnswers, validateScriptedAnswersAgainstTopic } from './scriptedAnswers.js';
+import { loadPersonaCatalog, loadPersonaRotation } from './personas.js';
 
 dotenv.config();
 
@@ -111,6 +112,15 @@ export function loadConfig(args) {
     throw new Error(`${runMode === 'fact_labeling_smoke' ? 'Fact Labeling Smoke Test' : 'Participant Getting Started'} mode requires a Common Ground Case ID.`);
   }
   const workflowScope = runModeToWorkflowScope(runMode);
+  const numberOfCases = cli.count ?? runConfig.numberOfCases ?? 1;
+  // A single case fails fast; a multi-case batch continues past failures by
+  // default so one bad case doesn't abort an unattended run. An explicit
+  // --stop-on-failure / --continue-on-failure flag or runConfig value wins.
+  const stopOnFailure = (cli.stopOnFailure ?? runConfig.stopOnFailure) ?? (numberOfCases <= 1);
+  const personaCatalog = loadPersonaCatalog(rootDir);
+  const personaPin = cli.personaId ?? runConfig.personaId ?? null;
+  const personaPlan = personaPin ? null : loadPersonaRotation(rootDir, cli.personaRotationPath ?? runConfig.personaRotationPath);
+  const personasEnabled = !cli.personasDisabled && Boolean(personaCatalog) && (Boolean(personaPin) || Boolean(personaPlan));
 
   return {
     rootDir,
@@ -140,8 +150,15 @@ export function loadConfig(args) {
       workflowScope,
       testObjective: cli.testObjective ?? runConfig.testObjective ?? 'Complete the Getting Started interview using only synthetic data.',
       testBehaviorPolicy: cli.testBehaviorPolicy ?? runConfig.testBehaviorPolicy ?? 'Answer each Partner AI question according to the high-quality criteria.',
-      numberOfCases: cli.count ?? runConfig.numberOfCases ?? 1,
-      stopOnFailure: cli.stopOnFailure ?? runConfig.stopOnFailure ?? true,
+      numberOfCases,
+      stopOnFailure,
+      resumeRunId: cli.resumeRunId ?? null,
+      personas: {
+        enabled: personasEnabled,
+        catalog: personaCatalog,
+        plan: personaPlan,
+        pinnedId: personaPin
+      },
       qualityCriteriaPath,
       qualityCriteria,
       scenarioFoundation,
@@ -193,6 +210,10 @@ function parseArgs(args) {
     if (arg === '--max-turns') parsed.maxTurns = Number(args[index + 1]);
     if (arg === '--continue-on-failure') parsed.stopOnFailure = false;
     if (arg === '--stop-on-failure') parsed.stopOnFailure = true;
+    if (arg === '--resume') parsed.resumeRunId = args[index + 1];
+    if (arg === '--persona') parsed.personaId = args[index + 1];
+    if (arg === '--persona-rotation') parsed.personaRotationPath = args[index + 1];
+    if (arg === '--no-personas') parsed.personasDisabled = true;
   }
 
   return parsed;

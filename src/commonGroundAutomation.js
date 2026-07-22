@@ -7,9 +7,11 @@ import { createScenarioController } from './scenarioController.js';
 import { matchScenarioQuestion, matchScenarioQuestionScored, matchScenarioCriterion, textSimilarity } from './questionMatching.js';
 import { pickScriptedAnswer } from './scriptedAnswers.js';
 
-export async function runAutomation(config, store) {
+export async function runAutomation(config, store, options = {}) {
   if (config.run.runMode !== 'fact_labeling_smoke') await verifyOpenAiConnectivity(config.llm);
   const browser = await chromium.launch(config.browser);
+  const persona = options.persona ?? null;
+  const caseNumber = options.caseNumber ?? 1;
   const requestorTranscript = [];
   const participantTranscript = [];
   const artifacts = {
@@ -26,6 +28,7 @@ export async function runAutomation(config, store) {
     status: 'started',
     startedAt: new Date().toISOString(),
     case: null,
+    persona,
     stages: [],
     transcripts: {
       requestorGettingStarted: requestorTranscript,
@@ -43,7 +46,7 @@ export async function runAutomation(config, store) {
     });
 
     if (config.run.runMode === 'full_workflow') {
-      return await runFullWorkflow({ browser, config, store, artifacts, syntheticCase, requestorTranscript, participantTranscript });
+      return await runFullWorkflow({ browser, config, store, artifacts, syntheticCase, requestorTranscript, participantTranscript, persona, caseNumber });
     }
 
     if (config.run.runMode === 'fact_labeling_smoke') {
@@ -66,7 +69,8 @@ export async function runAutomation(config, store) {
         seed: `${artifacts.case.commonGroundId ?? store.runId}:participant`,
         actorRole: 'participant',
         runDir: store.runDir,
-        scriptedAnswers: config.run.scriptedAnswers
+        scriptedAnswers: config.run.scriptedAnswers,
+        persona
       });
       artifacts.participantGettingStarted = participantResult;
       artifacts.completedGettingStarted = participantResult.completed;
@@ -110,7 +114,8 @@ export async function runAutomation(config, store) {
       seed: artifacts.case?.commonGroundId ?? artifacts.case?.syntheticReference ?? store.runId,
       actorRole: 'requestor',
       runDir: store.runDir,
-      scriptedAnswers: config.run.scriptedAnswers
+      scriptedAnswers: config.run.scriptedAnswers,
+      persona
     });
     updateArtifactCaseId(artifacts, findCaseIdInText(JSON.stringify(requestorTranscript)));
     artifacts.requestorGettingStarted = requestorResult;
@@ -247,7 +252,7 @@ async function openOwnFactReviewForSmokeTest(page, config, createdCase) {
   throw new Error(`Own-fact labeling page did not become available for ${createdCase.commonGroundId}.`);
 }
 
-async function runFullWorkflow({ browser, config, store, artifacts, syntheticCase, requestorTranscript, participantTranscript }) {
+async function runFullWorkflow({ browser, config, store, artifacts, syntheticCase, requestorTranscript, participantTranscript, persona, caseNumber }) {
   if (!config.run.scenarioFoundation) throw new Error('Full workflow mode requires a schemaVersion 2 topic definition.');
   const scenarioController = createScenarioController({
     foundation: config.run.scenarioFoundation,
@@ -276,7 +281,9 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     llm: config.llm,
     topic: config.run.scenarioFoundation.topic,
     scenario: selectedScenario,
-    seed: `${store.runId}:${syntheticCase.reference}`
+    seed: `${store.runId}:${syntheticCase.reference}`,
+    caseNumber,
+    persona
   });
   // Avoid an unhandled rejection if browser setup throws before we await it.
   dossiersPromise.catch(() => {});
@@ -364,6 +371,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     scenarioController,
     runDir: store.runDir,
     scriptedAnswers: config.run.scriptedAnswers,
+    persona,
     artifacts
   });
   artifacts.requestorGettingStarted = requestorResult;
@@ -375,7 +383,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     {
       page: requestorPage, config, store, createdCase: artifacts.case,
       actorLabel: 'Requestor', waitName: 'Requestor Fact Section', artifacts,
-      expectedStep: (t, u) => excerptReviewReady(t, u) || factLabelingReady(t, u)
+      expectedStep: (t, u) => clarifyContextReady(t, u) || excerptReviewReady(t, u) || factLabelingReady(t, u)
     },
     () => completeActorPostProcessing(requestorPage, config, artifacts, 'Requestor', ownFactLabel)
   );
@@ -436,6 +444,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     scenarioController,
     runDir: store.runDir,
     scriptedAnswers: config.run.scriptedAnswers,
+    persona,
     artifacts
   });
   artifacts.participantGettingStarted = participantResult;
@@ -447,7 +456,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     {
       page: participantPage, config, store, createdCase: artifacts.case,
       actorLabel: 'Participant', waitName: 'Participant Fact Section', artifacts,
-      expectedStep: (t, u) => excerptReviewReady(t, u) || factLabelingReady(t, u)
+      expectedStep: (t, u) => clarifyContextReady(t, u) || excerptReviewReady(t, u) || factLabelingReady(t, u)
     },
     () => completeActorPostProcessing(participantPage, config, artifacts, 'Participant', ownFactLabel)
   );
@@ -524,6 +533,10 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   }
 
   const coverage = scenarioController.getCoverageSummary();
+  // Behaviors are cleared per turn in scripted mode (see the scenarioTurn.behaviors
+  // reset), so the materialized schedule's counts are not a real target. Flag it so
+  // the report/UI/CSV show "N/A (scripted)" instead of a misleading 0/N.
+  coverage.behaviorsInjected = !config.run.scriptedAnswers;
   artifacts.behaviorCoverage = coverage;
   artifacts.behaviorExecutions = scenarioController.executionResults;
   artifacts.softAssertions = [
@@ -580,11 +593,55 @@ function normalizeCaseId(value) {
   return raw;
 }
 
+// Navigate with retry + a longer timeout: a single slow prod page load should not
+// kill a whole case. Retries up to `attempts` times with linear backoff.
+async function gotoWithRetry(page, url, options = {}) {
+  const attempts = options.attempts ?? 3;
+  const timeout = options.timeout ?? 60000;
+  const waitUntil = options.waitUntil ?? 'domcontentloaded';
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await page.goto(url, { waitUntil, timeout });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        const backoffMs = 2000 * attempt; // 2s, then 4s
+        console.warn(`[navigation] ${url} failed (attempt ${attempt}/${attempts}): ${error.message}. Retrying in ${backoffMs}ms.`);
+        await page.waitForTimeout(backoffMs);
+      }
+    }
+  }
+  throw new Error(`Navigation to ${url} failed after ${attempts} attempts: ${lastError?.message}`);
+}
+
+// The login form is client-rendered, so the email field can appear well after
+// domcontentloaded. Wait generously for it and reload once if it never hydrates,
+// before falling back to fill()'s own (shorter) wait — which would otherwise
+// hard-fail on a slow SPA load and report a misleading "Update selector" error.
+async function waitForLoginFormReady(page, selector) {
+  const locator = page.locator(selector).first();
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      await locator.waitFor({ state: 'visible', timeout: 30000 });
+      return;
+    } catch {
+      if (attempt < 2) {
+        console.warn(`[login] form field ${selector} not visible after 30s; reloading login page (attempt ${attempt}).`);
+        await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+      }
+    }
+  }
+  // Still absent: let fill() -> waitForVisible produce the canonical error.
+}
+
 async function login(page, config, role) {
   const selectors = config.selectors.auth;
   const credentials = config.credentials[role];
 
-  await page.goto(config.productionUrl, { waitUntil: 'domcontentloaded' });
+  await gotoWithRetry(page, config.productionUrl, { timeout: 60000 });
+  await waitForLoginFormReady(page, selectors.emailInput);
   await fill(page, selectors.emailInput, credentials.email, `${role} email`);
   await fill(page, selectors.passwordInput, credentials.password, `${role} password`);
   await click(page, selectors.submitButton, `${role} login submit`);
@@ -897,6 +954,7 @@ async function runPartnerAiInterviewTurns(page, config, transcript, options = {}
       // Scripted mode uses the live-app role assignment (participant = employee in
       // first person, requestor = manager in third person).
       scriptedMode: Boolean(scriptedAnswers),
+      persona: options.persona ?? null,
       latestPrompt,
       transcript,
       turn,
@@ -939,6 +997,21 @@ async function runPartnerAiInterviewTurns(page, config, transcript, options = {}
       observed: `${options.actorRole ?? 'requestor'} turn ${turn}: ${warning.observed}`
     })));
 
+    // Enforcement companion to the token clamp: if a sparse persona leaked
+    // specifics on a non-follow-up turn, record it as a soft failure so the
+    // "coax before detail" contract is observable, not just prompted.
+    if (responseContext.persona?.detail === 'sparse'
+      && responseContext.turnClassification
+      && !responseContext.turnClassification.isFollowUpTurn
+      && /\d|for example|for instance|such as|percent|%|\bmetric|benchmark/i.test(response)) {
+      options.artifacts?.softAssertions.push({
+        type: 'persona_sparse_leak',
+        passed: false,
+        expected: `Sparse persona "${responseContext.persona.id}" withholds specifics until Partner AI asks a follow-up.`,
+        observed: `${options.actorRole ?? 'requestor'} turn ${turn}: initial answer already volunteered concrete detail.`
+      });
+    }
+
     if (!scriptedAnswers && options.scenarioController && scenarioTurn?.primaryQuestionId) {
       retainPlannedSourceFacts(options.scenarioController, options.actorRole, scenarioTurn.primaryQuestionId, response);
     }
@@ -958,6 +1031,13 @@ async function runPartnerAiInterviewTurns(page, config, transcript, options = {}
 
     const visibleAfterResponse = await readVisibleBodyText(page);
     if (scenarioTurn?.behaviors?.length) {
+      if (!behaviorVerification.length) {
+        // Guardrail: behaviors were scheduled on this turn but no verification came
+        // back, so none can be marked complete (silent 0/N coverage). Scripted-answers
+        // runs clear scenarioTurn.behaviors earlier, so this only fires on a genuine
+        // verification-wiring regression in generateScenarioComposedResponse.
+        console.warn(`[behavior-coverage] ${options.actorRole ?? 'requestor'} turn ${turn}: ${scenarioTurn.behaviors.length} behavior(s) scheduled but behaviorVerification is empty; none can be completed.`);
+      }
       const observedQfi = extractLatestQfi(visibleAfterResponse);
       // Common Ground's own classification of the response just submitted.
       const observedIntent = extractLatestIntent(visibleAfterResponse);
@@ -1272,9 +1352,24 @@ async function labelFactStatements(page, config, labelText) {
 
 async function completeActorPostProcessing(page, config, artifacts, actorLabel, labelText = config.run.scenarioFoundation.topic.workflow.factStatementLabel) {
   const firstState = await waitForWorkflowState(page, config, {
-    name: `${actorLabel.toLowerCase()} excerpt review or fact statement labeling`,
-    ready: (text, currentPage) => excerptReviewReady(text, currentPage.url()) || factLabelingReady(text, currentPage.url())
+    name: `${actorLabel.toLowerCase()} clarify context, excerpt review or fact statement labeling`,
+    ready: (text, currentPage) => clarifyContextReady(text, currentPage.url())
+      || excerptReviewReady(text, currentPage.url())
+      || factLabelingReady(text, currentPage.url())
   });
+
+  // NEW optional step between interview and Excerpt Review. Skip it cleanly, then
+  // re-wait for the real post-processing steps.
+  if (clarifyContextReady(await readVisibleBodyText(page), page.url())) {
+    recordStage(artifacts, `${actorLabel} Clarify Context`, 'started', firstState.url);
+    const pathTaken = await skipClarifyContext(page, config);
+    console.log(`[clarify-context] ${actorLabel}: skipped optional step via ${pathTaken}.`);
+    recordStage(artifacts, `${actorLabel} Clarify Context`, 'skipped', `Optional step skipped without accepting suggestions (${pathTaken}).`);
+    await waitForWorkflowState(page, config, {
+      name: `${actorLabel.toLowerCase()} excerpt review or fact statement labeling`,
+      ready: (text, currentPage) => excerptReviewReady(text, currentPage.url()) || factLabelingReady(text, currentPage.url())
+    });
+  }
 
   const currentText = await readVisibleBodyText(page);
   if (excerptReviewReady(currentText, page.url())) {
@@ -1308,15 +1403,57 @@ function excerptReviewReady(text, url = '') {
     && /\bSubmit\b/i.test(value);
 }
 
+function clarifyContextReady(text, url = '') {
+  const value = String(text ?? '');
+  const currentUrl = String(url ?? '');
+  // Never mistake it for the neighbouring steps: Excerpt Review uses an "approved"
+  // counter + bare "Submit"; Clarify Context uses a "reviewed" counter + "Submit & Continue".
+  if (excerptReviewReady(value, url) || factLabelingReady(value, url)) return false;
+  if (/\/clarify-context(?:[/?#]|$)/i.test(currentUrl)) return true;
+  return /\bClarify Context\b/i.test(value)
+    && /\bSubmit\s*&?\s*Continue\b/i.test(value)
+    && /(\d+)\s*\/\s*(\d+)\s+reviewed/i.test(value);
+}
+
 function extractExcerptApprovalCount(text) {
   const match = String(text ?? '').match(/(\d+)\s*\/\s*(\d+)\s+approved/i);
   if (!match) return null;
   return { approved: Number(match[1]), total: Number(match[2]) };
 }
 
+// The Clarify Context step is optional. We skip it WITHOUT accepting any suggested
+// context (accepting would alter the synthetic test data). Prefer "Submit & Continue";
+// if it is missing/disabled or does not advance, fall back to the Excerpt Review tab.
+// Returns the path taken for logging.
+async function skipClarifyContext(page, config) {
+  const submitContinue = page.getByRole('button', { name: /Submit\s*&?\s*Continue/i }).first();
+  const visible = await submitContinue.isVisible({ timeout: 1000 }).catch(() => false);
+  const enabled = visible && await submitContinue.isEnabled({ timeout: 500 }).catch(() => false)
+    && (await submitContinue.getAttribute('aria-disabled').catch(() => null)) !== 'true';
+  if (enabled) {
+    await submitContinue.scrollIntoViewIfNeeded().catch(() => {});
+    await submitContinue.click();
+    await page.waitForLoadState('networkidle').catch(() => {});
+    await page.waitForTimeout(1500);
+    if (!clarifyContextReady(await readVisibleBodyText(page), page.url())) return 'submit-continue';
+  }
+  // Fallback: click the Excerpt Review tab directly (role=tab, else button/link/text).
+  const tab = page.getByRole('tab', { name: /Excerpt Review/i }).first();
+  if (await tab.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await tab.click().catch(() => {});
+  } else {
+    await page.getByRole('button', { name: /^Excerpt Review$/i }).first().click().catch(async () => {
+      await page.getByText(/^Excerpt Review$/i).first().click().catch(() => {});
+    });
+  }
+  await page.waitForLoadState('networkidle').catch(() => {});
+  await page.waitForTimeout(1500);
+  return 'excerpt-review-tab';
+}
+
 async function submitExcerptReview(page, config) {
   const startedAt = Date.now();
-  const deadline = startedAt + config.run.postCompletionWaitMs;
+  let deadline = startedAt + config.run.postCompletionWaitMs;
   let lastText = '';
   let lastApprovalCount = null;
   let lastSubmitState = 'not found';
@@ -1333,6 +1470,12 @@ async function submitExcerptReview(page, config) {
       else if (Date.now() - gateSince >= OTHER_PARTY_GATE_CONFIRM_MS) throw new OtherPartyGateError('excerpt review', page.url(), lastText);
     } else {
       gateSince = 0;
+    }
+
+    // Still processing → roll the deadline forward so a live processing screen
+    // never trips the fixed timeout (a true hang still ends at the original deadline).
+    if (isProcessingState(lastText)) {
+      deadline = Math.max(deadline, Date.now() + 180000);
     }
 
     if (lastApprovalCount?.total > 0 && lastApprovalCount.approved < lastApprovalCount.total) {
@@ -1407,7 +1550,7 @@ async function findExcerptSubmitControl(page) {
 
 async function waitForWorkflowState(page, config, { name, ready }) {
   const startedAt = Date.now();
-  const deadline = startedAt + config.run.postCompletionWaitMs;
+  let deadline = startedAt + config.run.postCompletionWaitMs;
   let lastText = '';
   let lastUrl = page.url();
   let gateSince = 0;
@@ -1427,6 +1570,14 @@ async function waitForWorkflowState(page, config, { name, ready }) {
       else if (Date.now() - gateSince >= OTHER_PARTY_GATE_CONFIRM_MS) throw new OtherPartyGateError(name, lastUrl, lastText);
     } else {
       gateSince = 0;
+    }
+    // While Common Ground is visibly still processing (e.g. "Processing your
+    // responses... 70% complete"), roll the deadline forward so an active
+    // processing screen never trips the fixed post-processing timeout — mirroring
+    // waitForInterviewReady. A true hang (processing text gone, still not ready)
+    // still ends at the original deadline.
+    if (isProcessingState(lastText)) {
+      deadline = Math.max(deadline, Date.now() + 180000);
     }
     await page.waitForTimeout(3000);
   }
@@ -1548,7 +1699,7 @@ async function completeParticipantFactReview(page, config, createdCase, labelTex
 
 async function completeCrossPartyFactReview(page, config, createdCase, labelText, options) {
   const startedAt = Date.now();
-  const deadline = startedAt + config.run.postCompletionWaitMs;
+  let deadline = startedAt + config.run.postCompletionWaitMs;
   let lastText = '';
   let lastUrl = page.url();
   let lastRefreshAt = 0;
@@ -1573,6 +1724,12 @@ async function completeCrossPartyFactReview(page, config, createdCase, labelText
       }
     } else {
       gateSince = 0;
+    }
+
+    // Still processing → roll the deadline forward so a live processing screen
+    // never trips the fixed timeout (a true hang still ends at the original deadline).
+    if (isProcessingState(lastText)) {
+      deadline = Math.max(deadline, Date.now() + 180000);
     }
 
     const opened = await openCrossPartyFactReviewIfRequired(page, createdCase, options);
@@ -1671,7 +1828,7 @@ async function openCaseAlignmentReport(page, config, createdCase) {
 
 async function waitForAndReadAlignmentReport(page, config, createdCase) {
   const startedAt = Date.now();
-  const deadline = startedAt + config.run.postCompletionWaitMs;
+  let deadline = startedAt + config.run.postCompletionWaitMs;
   let lastText = '';
   let lastUrl = page.url();
   let lastReloadAt = 0;
@@ -1679,6 +1836,12 @@ async function waitForAndReadAlignmentReport(page, config, createdCase) {
   while (Date.now() < deadline) {
     lastText = await readVisibleBodyText(page);
     lastUrl = page.url();
+
+    // Still processing → roll the deadline forward so a live processing screen
+    // never trips the fixed timeout (a true hang still ends at the original deadline).
+    if (isProcessingState(lastText)) {
+      deadline = Math.max(deadline, Date.now() + 180000);
+    }
 
     if (onAlignmentReportPage(lastUrl, lastText)) {
       // Landed on a different case's report — reopen the correct case and retry.
@@ -1823,10 +1986,13 @@ function compactVisibleText(text, maxLength = 1200) {
 }
 
 async function waitForFactLabelingReady(page, config) {
-  const deadline = Date.now() + config.run.postCompletionWaitMs;
+  let deadline = Date.now() + config.run.postCompletionWaitMs;
   while (Date.now() < deadline) {
     const text = await readVisibleBodyText(page);
     if (factLabelingReady(text, page.url())) return;
+    // Still processing → roll the deadline forward so a live processing screen
+    // never trips the fixed timeout (a true hang still ends at the original deadline).
+    if (isProcessingState(text)) deadline = Math.max(deadline, Date.now() + 180000);
     await page.waitForTimeout(1500);
   }
 
@@ -2212,7 +2378,7 @@ function isPostInterviewState(text) {
 }
 
 function isProcessingState(text) {
-  return /checking engagement|engagement levels?|still processing|processing your|analy[sz]ing|please wait|one moment|understanding your intent|understanding your response|thinking…|thinking\.\.\./i.test(String(text ?? ''));
+  return /checking engagement|engagement levels?|still processing|processing your|analy[sz]ing|please wait|one moment|understanding your intent|understanding your response|saving your response|saving your answer|\d+\s*%\s*complete|thinking…|thinking\.\.\./i.test(String(text ?? ''));
 }
 
 function otherPartyGate(text) {
@@ -2377,7 +2543,7 @@ async function waitForGettingStartedAfterRating(page, config, createdCase, synth
   // Getting Started button), but poll responsively and proceed the moment the
   // control is ready. The heavy dashboard re-open only runs periodically, since
   // re-entry is what surfaces the button — most checks stay fast.
-  const deadline = Date.now() + config.run.postCompletionWaitMs;
+  let deadline = Date.now() + config.run.postCompletionWaitMs;
   let lastReopenAt = 0;
   while (Date.now() < deadline) {
     // Already in the interview (input ready) → nothing to wait for.
@@ -2395,6 +2561,10 @@ async function waitForGettingStartedAfterRating(page, config, createdCase, synth
         return;
       }
     }
+
+    // Still processing → roll the deadline forward so a live processing screen
+    // never trips the fixed timeout (a true hang still ends at the original deadline).
+    if (isProcessingState(text)) deadline = Math.max(deadline, Date.now() + 180000);
 
     // Re-open the case roughly every 10s (re-entry surfaces the button); between
     // re-opens, poll the current page every ~1.5s so we proceed as soon as ready.
@@ -2890,6 +3060,7 @@ export const workflowTestSupport = {
   evaluateExpectedPartnerBehavior,
   interviewReadySignal,
   excerptReviewReady,
+  clarifyContextReady,
   extractExcerptApprovalCount,
   extractFactLabelCount,
   extractCrossRateRemainingCount,
