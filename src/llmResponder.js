@@ -1,5 +1,6 @@
 import { extractPromptContext } from './promptContext.js';
 import { generateScenarioDossiers as buildScenarioDossiers } from './scenarioDossiers.js';
+import { domainRoleForActor, perspectiveForDomainRole } from './roleMapping.js';
 
 export async function generatePartnerAiResponse(context) {
   if (context.llm?.apiKey) {
@@ -242,6 +243,7 @@ function isCompactStyleFailure(validation) {
 function buildGenerationInput(context, promptContext, activeQualityCriteria) {
   const actorPerspective = resolveActorPerspective({
     actorRole: context.actorRole ?? 'requestor',
+    requestorRole: context.requestorRole,
     scriptedMode: context.scriptedMode ?? false,
     promptContext,
     transcript: context.transcript,
@@ -249,6 +251,7 @@ function buildGenerationInput(context, promptContext, activeQualityCriteria) {
   });
   return {
     actorRole: context.actorRole ?? 'requestor',
+    requestorRole: context.requestorRole,
     actorPerspective,
     topic: context.topic,
     testBehaviorPolicy: context.testBehaviorPolicy,
@@ -1207,7 +1210,7 @@ export function validateScenarioResponse(input, candidateResponse) {
       return {
         pass: false,
         reason: `The response directly contradicts the assigned scenario rating: ${missingRating}.`,
-        correction: scenarioRatingCorrection(missingRating, input.actorRole)
+        correction: scenarioRatingCorrection(missingRating, input.actorRole, input.requestorRole)
       };
     }
     warnings.push({
@@ -1485,19 +1488,15 @@ function withBehaviorValidation(result, behaviorCheck = {}) {
   };
 }
 
-function resolveActorPerspective({ actorRole }) {
-  // Perspective is fixed by the assigned actor role, not inferred per turn. The
-  // requestor who created the case is the employee being reviewed (first person); the
-  // invited participant is the manager evaluating them (third person). Confirmed
-  // 2026-07-16 from Common Ground's own prompts, which ask the requestor about "your
-  // performance" and what "you delivered".
-  //
-  // Scripted mode previously inverted this, which fed the requestor third-person
-  // manager prose in reply to first-person questions and failed validation as
-  // off-target. Both modes now agree, so there is no mode split: this mirrors the
-  // actor->dossier mapping in scenarioController.js (requestor = employee positions)
-  // and the scripted answer mapping in scriptedAnswers.js (requestor = employee answer).
-  return actorRole === 'participant' ? 'manager_evaluating_employee' : 'employee_self_assessment';
+function resolveActorPerspective({ actorRole, requestorRole }) {
+  // Perspective follows the domain role the actor holds (employee → first-person
+  // self-assessment, manager → third-person evaluation of the employee), driven by the
+  // per-topic requestorRole rather than a fixed requestor=employee assumption. The
+  // redesigned Common Ground creates cases from the manager's side, so which actor is the
+  // employee depends on the case type / run config. This mirrors the actor->dossier
+  // mapping in scenarioController.js and the scripted answer mapping in scriptedAnswers.js,
+  // all routed through src/roleMapping.js.
+  return perspectiveForDomainRole(domainRoleForActor(actorRole, requestorRole));
 }
 
 function questionRequiresExplicitScenarioRating(input) {
@@ -1569,8 +1568,8 @@ function responseContradictsRating(response, ratingId) {
   return contradictions[ratingId]?.test(response) ?? false;
 }
 
-function scenarioRatingCorrection(ratingId, actorRole) {
-  const subject = actorRole === 'participant' ? "the employee's performance" : 'my performance';
+function scenarioRatingCorrection(ratingId, actorRole, requestorRole) {
+  const subject = domainRoleForActor(actorRole, requestorRole) === 'manager' ? "the employee's performance" : 'my performance';
   const phrases = {
     unsatisfactory: `${subject} is materially below expectations; explain why the favorable evidence is insufficient and do not say it meets expectations.`,
     needs_improvement: `${subject} needs improvement and has meaningful gaps that require focused improvement.`,

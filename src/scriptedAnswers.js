@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { scriptedAnswersSchema } from './scenarioSchemas.js';
+import { domainRoleForActor } from './roleMapping.js';
 
 // Loads and validates a scripted-answers file (see scriptedAnswersSchema).
 // Returns the parsed object, or throws on malformed JSON / schema failure.
@@ -18,24 +19,22 @@ export function loadScriptedAnswers(rootDir, relativePath) {
   return scriptedAnswersSchema.parse(raw);
 }
 
-// In the live Common Ground performance-review flow the requestor who created the
-// case is the Employee being reviewed (first-person self-evaluation) and the invited
-// participant is the Manager (third-person assessment). Confirmed 2026-07-16 from
-// Common Ground's own interview prompts to the requestor ("what role responsibilities
-// should your performance be evaluated against?", "what results did you deliver?").
-// So the requestor speaks with the employee answer and the participant with the
-// manager answer.
-function actorAnswerKey(actorRole) {
-  return actorRole === 'participant' ? 'manager' : 'employee';
+// Scripted-answer files are keyed by domain role (`employee` / `manager`), which is
+// invariant to who created the case. Which actor speaks each answer depends on the
+// per-topic requestorRole: the redesigned Common Ground creates Performance Review from
+// the manager's side (requestor = manager), while a Raise is employee-initiated
+// (requestor = employee). The routing lives in src/roleMapping.js.
+function actorAnswerKey(actorRole, requestorRole) {
+  return domainRoleForActor(actorRole, requestorRole); // 'employee' | 'manager'
 }
 
 // Returns the scripted answer string for an actor + primary question, or null
 // when no answer is scripted for that side (caller then falls back to the LLM).
-export function pickScriptedAnswer(scriptedAnswers, primaryQuestionId, actorRole) {
+export function pickScriptedAnswer(scriptedAnswers, primaryQuestionId, actorRole, requestorRole) {
   if (!scriptedAnswers || !primaryQuestionId) return null;
   const entry = scriptedAnswers.answers.find((item) => item.primaryQuestionId === primaryQuestionId);
   if (!entry) return null;
-  return entry[actorAnswerKey(actorRole)] ?? null;
+  return entry[actorAnswerKey(actorRole, requestorRole)] ?? null;
 }
 
 // Cross-checks a scripted-answers file against a topic definition. Returns

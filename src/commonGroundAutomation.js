@@ -59,7 +59,7 @@ export async function runAutomation(config, store, options = {}) {
       recordStage(artifacts, 'Open existing case', 'started', artifacts.case.commonGroundId);
       const participantInterviewContext = await browser.newContext();
       const participantInterviewPage = await participantInterviewContext.newPage();
-      await login(participantInterviewPage, config, 'participant');
+      await login(participantInterviewPage, config, 'participant', store);
       await openCaseAsParticipant(participantInterviewPage, config, artifacts.case, syntheticCase);
       recordStage(artifacts, 'Open existing case', 'passed', artifacts.case.commonGroundId);
 
@@ -89,23 +89,23 @@ export async function runAutomation(config, store, options = {}) {
     recordStage(artifacts, 'Create case', 'started');
     const requestorContext = await browser.newContext();
     const requestorPage = await requestorContext.newPage();
-    await login(requestorPage, config, 'requestor');
-    artifacts.case = await createCase(requestorPage, config, syntheticCase);
+    await login(requestorPage, config, 'requestor', store);
+    artifacts.case = await createCase(requestorPage, config, syntheticCase, store);
     await requestorContext.close();
     recordStage(artifacts, 'Create case', 'passed', artifacts.case?.commonGroundId ?? artifacts.case?.syntheticReference ?? '');
 
     recordStage(artifacts, 'Accept participant invitation', 'started');
     const participantContext = await browser.newContext();
     const participantPage = await participantContext.newPage();
-    await login(participantPage, config, 'participant');
-    await acceptCaseRequest(participantPage, config, syntheticCase, artifacts.case);
+    await login(participantPage, config, 'participant', store);
+    await acceptCaseRequest(participantPage, config, syntheticCase, artifacts.case, store);
     await participantContext.close();
     recordStage(artifacts, 'Accept participant invitation', 'passed');
 
     recordStage(artifacts, 'Requestor Getting Started', 'started');
     const interviewContext = await browser.newContext();
     const interviewPage = await interviewContext.newPage();
-    await login(interviewPage, config, 'requestor');
+    await login(interviewPage, config, 'requestor', store);
     await openCaseAsRequestor(interviewPage, config, artifacts.case, syntheticCase);
     await startGettingStarted(interviewPage, config, artifacts.case);
     updateArtifactCaseId(artifacts, await findCaseId(interviewPage));
@@ -191,7 +191,7 @@ async function runFactLabelingSmoke({ browser, config, store, artifacts, synthet
   recordStage(artifacts, stage.label, 'started', artifacts.case.commonGroundId);
   const context = await browser.newContext();
   const page = await context.newPage();
-  await login(page, config, stage.actorRole);
+  await login(page, config, stage.actorRole, store);
   if (stage.actorRole === 'participant') await openCaseAsParticipant(page, config, artifacts.case, syntheticCase);
   else await openCaseAsRequestor(page, config, artifacts.case, syntheticCase);
 
@@ -258,7 +258,8 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     foundation: config.run.scenarioFoundation,
     alignmentScenarioId: config.run.alignmentScenarioId,
     behaviorSchedule: config.run.behaviorSchedule,
-    seed: config.run.scenarioSeed || store.runId
+    seed: config.run.scenarioSeed || store.runId,
+    requestorRole: config.run.requestorRole
   });
   const selectedScenario = config.run.scenarioFoundation.alignmentScenarios.scenarios
     .find((scenario) => scenario.id === config.run.alignmentScenarioId);
@@ -291,16 +292,16 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   recordStage(artifacts, 'Create case', 'started');
   const requestorSetupContext = await browser.newContext();
   const requestorSetupPage = await requestorSetupContext.newPage();
-  await login(requestorSetupPage, config, 'requestor');
-  artifacts.case = await createCase(requestorSetupPage, config, syntheticCase);
+  await login(requestorSetupPage, config, 'requestor', store);
+  artifacts.case = await createCase(requestorSetupPage, config, syntheticCase, store);
   await requestorSetupContext.close();
   recordStage(artifacts, 'Create case', 'passed', artifacts.case?.commonGroundId ?? artifacts.case?.syntheticReference ?? '');
 
   recordStage(artifacts, 'Accept participant invitation', 'started');
   const participantSetupContext = await browser.newContext();
   const participantSetupPage = await participantSetupContext.newPage();
-  await login(participantSetupPage, config, 'participant');
-  await acceptCaseRequest(participantSetupPage, config, syntheticCase, artifacts.case);
+  await login(participantSetupPage, config, 'participant', store);
+  await acceptCaseRequest(participantSetupPage, config, syntheticCase, artifacts.case, store);
   await participantSetupContext.close();
   recordStage(artifacts, 'Accept participant invitation', 'passed');
 
@@ -327,7 +328,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   // window stays visible during the dossier wait instead of a blank one.
   const requestorContext = await browser.newContext();
   const requestorPage = await requestorContext.newPage();
-  await login(requestorPage, config, 'requestor');
+  await login(requestorPage, config, 'requestor', store);
   await openCaseAsRequestor(requestorPage, config, artifacts.case, syntheticCase);
 
   // D8: click into Getting Started as soon as its link is available on the Case
@@ -398,7 +399,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   // requestor's fact statements have been rated.
   const participantContext = await browser.newContext();
   const participantPage = await participantContext.newPage();
-  await login(participantPage, config, 'participant');
+  await login(participantPage, config, 'participant', store);
   await openCaseAsParticipant(participantPage, config, artifacts.case, syntheticCase);
 
   recordStage(artifacts, 'Participant Rates Requestor Facts', 'started');
@@ -468,7 +469,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   recordStage(artifacts, 'Requestor Rates Participant Facts', 'started');
   const requestorReviewContext = await browser.newContext();
   const requestorReviewPage = await requestorReviewContext.newPage();
-  await login(requestorReviewPage, config, 'requestor');
+  await login(requestorReviewPage, config, 'requestor', store);
   await openCaseAsRequestor(requestorReviewPage, config, artifacts.case, syntheticCase);
   await withOtherPartyGateRecovery(
     {
@@ -495,7 +496,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   const reportPage = await reportContext.newPage();
   let alignmentReportIssue = null;
   try {
-    await login(reportPage, config, 'requestor');
+    await login(reportPage, config, 'requestor', store);
     await openCaseAsRequestor(reportPage, config, artifacts.case, syntheticCase);
     // Poll for the full configured post-processing window (e.g. 10 minutes) rather
     // than a hard 3-minute cap. The report can take several minutes to render, and
@@ -616,32 +617,58 @@ async function gotoWithRetry(page, url, options = {}) {
   throw new Error(`Navigation to ${url} failed after ${attempts} attempts: ${lastError?.message}`);
 }
 
-// The login form is client-rendered, so the email field can appear well after
-// domcontentloaded. Wait generously for it and reload once if it never hydrates,
-// before falling back to fill()'s own (shorter) wait — which would otherwise
-// hard-fail on a slow SPA load and report a misleading "Update selector" error.
-async function waitForLoginFormReady(page, selector) {
-  const locator = page.locator(selector).first();
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    try {
-      await locator.waitFor({ state: 'visible', timeout: 30000 });
-      return;
-    } catch {
-      if (attempt < 2) {
-        console.warn(`[login] form field ${selector} not visible after 30s; reloading login page (attempt ${attempt}).`);
-        await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
-      }
-    }
-  }
-  // Still absent: let fill() -> waitForVisible produce the canonical error.
+// The login form is client-rendered, so #email can appear well after domcontentloaded.
+// Returns true once it is visible, false if it never shows within the timeout — the
+// caller decides whether to fall back to another entry path.
+async function waitForLoginForm(page, emailSelector, timeoutMs = 20000) {
+  return page.locator(emailSelector).first()
+    .waitFor({ state: 'visible', timeout: timeoutMs })
+    .then(() => true)
+    .catch(() => false);
 }
 
-async function login(page, config, role) {
+// COMMON_GROUND_URL may land on the marketing landing page or the corporate signup page
+// instead of the login form. Reach the real /login form robustly: go straight to /login
+// first (the landing and signup pages both link there, and /login renders the form
+// directly even when unauthenticated); if that does not produce the form, fall back to
+// clicking the "Log-In" link on whatever entry page loaded; then one more direct /login.
+// Screenshot + fail if none works. Credentials are only entered once the form is present.
+async function ensureLoginForm(page, config, selectors, role, store) {
+  const loginUrl = new URL('/login', config.productionUrl).toString();
+
+  // Primary: navigate straight to /login and wait for the form to hydrate.
+  await gotoWithRetry(page, loginUrl, { timeout: 60000 });
+  if (await waitForLoginForm(page, selectors.emailInput)) return;
+
+  // Fallback: load the app root (landing page) and click its "Log-In" link.
+  await gotoWithRetry(page, config.productionUrl, { timeout: 60000 });
+  const loginLink = page
+    .getByRole('link', { name: /^(?:already have an account\?\s*)?log\s*-?\s*in$/i })
+    .first();
+  if (await loginLink.isVisible({ timeout: 5000 }).catch(() => false)) {
+    await loginLink.click().catch(() => {});
+    await waitForIdle(page);
+    if (await waitForLoginForm(page, selectors.emailInput)) return;
+  }
+
+  // Last resort: one more direct /login attempt (covers a slow first hydration).
+  await gotoWithRetry(page, loginUrl, { timeout: 60000 });
+  if (await waitForLoginForm(page, selectors.emailInput)) return;
+
+  const shot = `${store?.runDir ?? '.'}/login-page-not-reachable-${role}.png`;
+  await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
+  throw new Error(
+    `Could not reach the ${role} login form. Tried direct ${loginUrl} and the "Log-In" `
+    + `link on the entry page (landing / corporate signup). Current URL: ${page.url()}. `
+    + `The staging entry flow may have changed. Screenshot: ${shot}`
+  );
+}
+
+async function login(page, config, role, store) {
   const selectors = config.selectors.auth;
   const credentials = config.credentials[role];
 
-  await gotoWithRetry(page, config.productionUrl, { timeout: 60000 });
-  await waitForLoginFormReady(page, selectors.emailInput);
+  await ensureLoginForm(page, config, selectors, role, store);
   await fill(page, selectors.emailInput, credentials.email, `${role} email`);
   await fill(page, selectors.passwordInput, credentials.password, `${role} password`);
   await click(page, selectors.submitButton, `${role} login submit`);
@@ -655,7 +682,7 @@ async function logout(page, config) {
   await page.waitForLoadState('networkidle').catch(() => {});
 }
 
-async function createCase(page, config, syntheticCase) {
+async function createCase(page, config, syntheticCase, store) {
   const selectors = config.selectors.requestor;
 
   await page.goto(new URL('/dashboard', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' });
@@ -666,12 +693,12 @@ async function createCase(page, config, syntheticCase) {
   await page.waitForLoadState('networkidle').catch(() => {});
   await assertNotLoginRequired(page, 'open new case page');
   await selectCaseType(page, syntheticCase.caseType);
-  // The New Case Request form auto-fills the logged-in user's party and leaves the
-  // other party empty. Fill every present date with today, then fill the empty
-  // party's Name/Email by detecting empty, editable fields (not a fixed party id).
+  // Fill every present date with today, then populate the two parties. The redesigned
+  // New Discussion form replaced the manager's free-text fields with a "Select a
+  // manager" dropdown and no longer auto-fills the requestor's party, so party filling
+  // now branches on whether that dropdown is present (see fillCaseParties).
   await fillPresentDates(page, todayIso());
-  await fillFirstEmpty(page, 'input[type="text"]', syntheticCase.participantName, 'empty party name');
-  await fillFirstEmpty(page, 'input[type="email"]', syntheticCase.participantEmail, 'empty party email');
+  await fillCaseParties(page, selectors, config, syntheticCase, store);
   await click(page, selectors.createCaseButton, 'create case submit');
   await page.waitForLoadState('networkidle').catch(() => {});
   await page.waitForTimeout(2000);
@@ -717,12 +744,76 @@ async function waitForCreatedCaseId(page, config, existingCaseIds = []) {
   return null;
 }
 
-async function acceptCaseRequest(page, config, syntheticCase, createdCase) {
+async function acceptCaseRequest(page, config, syntheticCase, createdCase, store) {
   await ensureOnDashboard(page, config);
+  await waitForDiscussionsLoaded(page);
   await clickCaseCardButton(page, createdCase, /Review Invitation|Review|Invitation/i);
   await waitForIdle(page);
-  await click(page, config.selectors.participant.acceptRequestButton, 'accept case request');
-  await waitForIdle(page);
+  await acceptInvitationAndConfirm(page, config, createdCase, store);
+}
+
+// The invitation review page (/request-review) hydrates after network-idle, so an Accept
+// click fired too early is silently dropped and the case stays Pending — which is what made
+// the old step "pass" while leaving the requestor unable to start. Click Accept once it is
+// actionable, then confirm the case actually flips to Active, retrying once and failing
+// loudly (with a screenshot) rather than trusting an unverified click.
+async function acceptInvitationAndConfirm(page, config, createdCase, store) {
+  const acceptSelector = config.selectors.participant.acceptRequestButton;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const accept = page.locator(acceptSelector).first();
+    // The /request-review page renders its Decline/Accept buttons a few seconds after
+    // navigation, so WAIT for the button to appear — locator.isVisible() is an immediate
+    // check that does not wait, and would skip the click during the hydration window.
+    const appeared = await accept.waitFor({ state: 'visible', timeout: 30000 }).then(() => true).catch(() => false);
+    if (appeared) {
+      await page.waitForTimeout(750); // let the SPA attach the click handler
+      await accept.click({ timeout: 10000 }).catch(() => {});
+      await waitForIdle(page);
+    }
+    if (await caseIsActive(page, config, createdCase)) return;
+    if (attempt < 2) {
+      await ensureOnDashboard(page, config);
+      await waitForDiscussionsLoaded(page);
+      if (await caseIsActive(page, config, createdCase)) return;
+      await clickCaseCardButton(page, createdCase, /Review Invitation|Review|Invitation/i).catch(() => {});
+      await waitForIdle(page);
+    }
+  }
+  const shot = `${store.runDir}/accept-invitation-failed.png`;
+  await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
+  throw new Error(`Accepted the invitation for ${createdCase.commonGroundId}, but the case never became Active (still Pending). The invitation-review UI may have changed. Screenshot: ${shot}`);
+}
+
+// Report whether the case shows as accepted (Active) on the dashboard — its card no longer
+// offers "Review Invitation" and now offers "Getting Started".
+async function caseIsActive(page, config, createdCase) {
+  await ensureOnDashboard(page, config);
+  await waitForDiscussionsLoaded(page);
+  return page.evaluate((targets) => {
+    const heading = [...document.querySelectorAll('h1,h2,h3,h4')]
+      .find((h) => targets.some((t) => t && h.innerText.includes(t)));
+    let node = heading;
+    for (let i = 0; i < 8 && node; i += 1) {
+      const text = node.innerText || '';
+      if (/CG-\d+/.test(text) && /(Manager:|Employee:)/.test(text)) {
+        return /\bActive\b/i.test(text) || /Getting Started/i.test(text);
+      }
+      node = node.parentElement;
+    }
+    return false;
+  }, caseSearchTargets(createdCase));
+}
+
+// The dashboard fetches its discussions after network-idle, showing "Loading discussions…"
+// meanwhile, so a case-card lookup can race the fetch. Wait for that state to clear.
+async function waitForDiscussionsLoaded(page, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const text = await readVisibleBodyText(page);
+    if (!isDashboardPage(page.url(), text)) return;
+    if (!/Loading discussions/i.test(text) && /(CG-\d+|Waiting for a Discussion)/i.test(text)) return;
+    await page.waitForTimeout(500);
+  }
 }
 
 async function openCaseAsRequestor(page, config, createdCase, syntheticCase) {
@@ -944,6 +1035,7 @@ async function runPartnerAiInterviewTurns(page, config, transcript, options = {}
 
     const responseContext = {
       actorRole: options.actorRole ?? 'requestor',
+      requestorRole: config.run.requestorRole,
       topic: config.run.topic,
       testBehaviorPolicy: config.run.testBehaviorPolicy,
       qualityCriteria: config.run.qualityCriteria,
@@ -1226,7 +1318,7 @@ function selectScriptedAnswer({ config, scriptedAnswers, scenarioTurn, latestPro
 
   if (!primaryQuestionId || answeredScriptedQuestions.has(primaryQuestionId)) return null;
 
-  const text = pickScriptedAnswer(scriptedAnswers, primaryQuestionId, actorRole ?? 'requestor');
+  const text = pickScriptedAnswer(scriptedAnswers, primaryQuestionId, actorRole ?? 'requestor', config.run.requestorRole);
   if (!text) return null;
 
   answeredScriptedQuestions.add(primaryQuestionId);
@@ -2686,6 +2778,103 @@ async function fillFirstEmpty(page, selector, value, label) {
   throw new Error(`Could not find an empty, editable field for ${label} (selector: ${selector}). The New Case Request form may have changed.`);
 }
 
+// Populate Party 1 and Party 2 on the New Discussion form. The redesigned Raise Request
+// form makes Party 2 (the Manager) a "Select a manager" dropdown that auto-fills the
+// manager's Email, and it no longer auto-fills Party 1 (the Employee = the logged-in
+// requestor). When that dropdown is present we fill the employee's text fields and pick
+// the manager whose auto-filled Email matches the participant the tool later logs in as.
+// When it is absent (older/other forms where both parties are free text and the app
+// auto-fills the logged-in party) we fall back to the previous "fill the empty party"
+// behavior, so this change is backward-compatible.
+async function fillCaseParties(page, selectors, config, syntheticCase, store) {
+  const managerSelect = page.locator(selectors.managerSelect).first();
+  const hasManagerDropdown = await managerSelect.isVisible({ timeout: 5000 }).catch(() => false);
+
+  if (hasManagerDropdown) {
+    await fillIfEmpty(page, selectors.employeeNameInput, syntheticCase.requestorName, 'employee (Party 1) name');
+    await fillIfEmpty(page, selectors.employeeEmailInput, config.credentials.requestor.email, 'employee (Party 1) email');
+    await selectManagerParty(page, managerSelect, config.credentials.participant.email, store);
+    return;
+  }
+
+  await fillFirstEmpty(page, 'input[type="text"]', syntheticCase.participantName, 'empty party name');
+  await fillFirstEmpty(page, 'input[type="email"]', syntheticCase.participantEmail, 'empty party email');
+}
+
+// Fill a field only if it is currently empty, so an environment that still auto-fills the
+// requestor's party keeps the app's own (real) values instead of being overwritten.
+async function fillIfEmpty(page, selector, value, label) {
+  const locator = await waitForVisible(page, selector, label);
+  if (await locator.inputValue().catch(() => '')) return;
+  await locator.fill(value);
+}
+
+// Choose Party 2 (the Manager) from the "Select a manager" dropdown. Managers listed are
+// real accounts and the option text carries no email, so we select each candidate, read
+// the Email the form auto-fills, and keep the one matching the participant account the
+// tool logs in as to accept the case. If none matches (or the list is empty) we screenshot
+// and fail rather than submit an empty/incorrect Party 2.
+async function selectManagerParty(page, managerSelect, participantEmail, store) {
+  const options = await managerSelect.locator('option').evaluateAll((opts) =>
+    opts.map((o) => ({ value: o.value, label: (o.textContent || '').trim(), disabled: o.disabled })));
+  const candidates = options.filter((o) => o.value && !o.disabled);
+  const wanted = participantEmail.trim().toLowerCase();
+
+  if (candidates.length === 0) {
+    await failManagerSelection(page, store,
+      'The "Select a manager" dropdown has no selectable managers, so Party 2 cannot be assigned.');
+  }
+
+  let matched = null;
+  let shownEmail = null;
+  for (const option of candidates) {
+    await managerSelect.selectOption(option.value);
+    shownEmail = await waitForManagerEmail(page);
+    if (shownEmail && shownEmail.toLowerCase() === wanted) {
+      matched = option;
+      break;
+    }
+  }
+
+  if (!matched) {
+    await failManagerSelection(page, store,
+      `No manager in the "Select a manager" dropdown has the participant email ${participantEmail}. ` +
+      `Available managers: ${candidates.map((c) => c.label).join(', ') || '(none)'}. ` +
+      'Refusing to submit with an empty or incorrect Party 2.');
+  }
+
+  console.log(`[case] Party 2 manager selected: "${matched.label}" — auto-filled email ${shownEmail}.`);
+}
+
+// After a manager is picked the form renders the manager's Email as visible text (a
+// <span>, not an input). Poll briefly for it, restricted to visible nodes so Next.js RSC
+// <script> payloads (which contain email-like strings) are ignored. Returns the shown
+// email, or null if none appears.
+async function waitForManagerEmail(page, timeoutMs = 8000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const email = await page.evaluate(() => {
+      const nodes = [...document.querySelectorAll('span, p, div, td')];
+      const hit = nodes.find((el) =>
+        el.children.length === 0 &&
+        el.offsetParent !== null &&
+        /^[\w.+-]+@[\w-]+\.[\w.-]+$/.test((el.textContent || '').trim()));
+      return hit ? hit.textContent.trim() : null;
+    });
+    if (email) return email;
+    await page.waitForTimeout(300);
+  }
+  return null;
+}
+
+// Screenshot and throw, so a failed manager selection stops the run cleanly instead of
+// submitting an empty Party 2.
+async function failManagerSelection(page, store, message) {
+  const shot = `${store.runDir}/party2-manager-selection-failed.png`;
+  await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
+  throw new Error(`${message} Screenshot: ${shot}`);
+}
+
 async function click(page, selector, label) {
   const locator = await waitForVisible(page, selector, label);
   await locator.click();
@@ -2906,6 +3095,10 @@ function updateArtifactCaseId(artifacts, commonGroundId) {
 }
 
 async function openCaseFromDashboard(page, createdCase, caseType) {
+  // The dashboard fetches its case cards after network-idle ("Loading discussions…"), so
+  // wait for that before searching for the case heading — otherwise the lookup races the
+  // fetch and wrongly concludes the case is absent.
+  await waitForDiscussionsLoaded(page);
   const headings = page.locator('h1, h2, h3');
   const headingCount = await headings.count();
   const targets = caseSearchTargets(createdCase, caseType);
@@ -2952,6 +3145,20 @@ async function openCaseDetailsFromDashboard(page, createdCase, caseType) {
 }
 
 async function clickCaseCardButton(page, createdCase, buttonPattern) {
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      await clickCaseCardButtonOnce(page, createdCase, buttonPattern);
+      return;
+    } catch (error) {
+      if (attempt >= 2) throw error;
+      // The card may not have hydrated yet ("Loading discussions…"); wait and retry once.
+      await waitForDiscussionsLoaded(page);
+      await page.waitForTimeout(500);
+    }
+  }
+}
+
+async function clickCaseCardButtonOnce(page, createdCase, buttonPattern) {
   await page.evaluate(({ targets, patternSource, patternFlags, requireExactCaseMatch }) => {
     const pattern = new RegExp(patternSource, patternFlags);
     const headings = [...document.querySelectorAll('h1,h2,h3')];

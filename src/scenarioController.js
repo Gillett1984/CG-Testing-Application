@@ -3,6 +3,7 @@ import {
   behaviorScheduleSchema,
   materializedScenarioPlanSchema
 } from './scenarioSchemas.js';
+import { domainRoleForActor } from './roleMapping.js';
 
 const SOURCE_DEPENDENT_BEHAVIORS = new Set([
   'correction_previous_response',
@@ -15,7 +16,8 @@ export function createScenarioController({
   foundation,
   alignmentScenarioId,
   behaviorSchedule = foundation?.defaultBehaviorSchedule,
-  seed
+  seed,
+  requestorRole
 }) {
   if (!foundation?.topic || !foundation?.alignmentScenarios || !foundation?.behaviorCatalog) {
     throw new Error('A validated scenario foundation is required.');
@@ -46,16 +48,18 @@ export function createScenarioController({
     plan,
     topic: foundation.topic,
     scenario,
-    behaviorCatalog: foundation.behaviorCatalog
+    behaviorCatalog: foundation.behaviorCatalog,
+    requestorRole
   });
 }
 
 export class ScenarioController {
-  constructor({ plan, topic, scenario, behaviorCatalog }) {
+  constructor({ plan, topic, scenario, behaviorCatalog, requestorRole }) {
     this.plan = structuredClone(plan);
     this.topic = topic;
     this.scenario = scenario;
     this.behaviorCatalog = behaviorCatalog;
+    this.requestorRole = requestorRole ?? 'manager';
     this.behaviorProgress = new Map(
       this.plan.behaviors.map((assignment) => [behaviorAssignmentKey(assignment), {
         status: 'pending',
@@ -113,26 +117,22 @@ export class ScenarioController {
           unit: String(metric.unit ?? 'synthetic performance units')
         }];
       }
-      event.actorInterpretations.requestor = {
-        ratingId: employeePosition.ratingId,
-        stance: employeePosition.conclusion,
-        evidenceEmphasis: employeePosition.supportingFacts,
-        counterEvidence: employeePosition.counterEvidence,
-        counterEvidenceExplanation: employeePosition.counterEvidenceExplanation,
-        attribution: employeePosition.attribution,
-        consistency: employeePosition.consistency,
-        independence: employeePosition.independence
-      };
-      event.actorInterpretations.participant = {
-        ratingId: managerPosition.ratingId,
-        stance: managerPosition.conclusion,
-        evidenceEmphasis: managerPosition.supportingFacts,
-        counterEvidence: managerPosition.counterEvidence,
-        counterEvidenceExplanation: managerPosition.counterEvidenceExplanation,
-        attribution: managerPosition.attribution,
-        consistency: managerPosition.consistency,
-        independence: managerPosition.independence
-      };
+      // Route each actor to the employee/manager position for the domain role they hold
+      // (requestorRole-driven), rather than assuming requestor = employee.
+      const interpretationFrom = (position) => ({
+        ratingId: position.ratingId,
+        stance: position.conclusion,
+        evidenceEmphasis: position.supportingFacts,
+        counterEvidence: position.counterEvidence,
+        counterEvidenceExplanation: position.counterEvidenceExplanation,
+        attribution: position.attribution,
+        consistency: position.consistency,
+        independence: position.independence
+      });
+      const positionForActor = (actor) =>
+        domainRoleForActor(actor, this.requestorRole) === 'employee' ? employeePosition : managerPosition;
+      event.actorInterpretations.requestor = interpretationFrom(positionForActor('requestor'));
+      event.actorInterpretations.participant = interpretationFrom(positionForActor('participant'));
     }
   }
 
@@ -150,7 +150,8 @@ export class ScenarioController {
 
     const termIds = criterion?.termIds ?? [question.primaryTermId];
     const termIdSet = new Set(termIds);
-    const actorDossier = actor === 'requestor' ? this.dossiers?.employee : this.dossiers?.manager;
+    const actorDossier = domainRoleForActor(actor, this.requestorRole) === 'employee'
+      ? this.dossiers?.employee : this.dossiers?.manager;
     const scenarioExpression = this.dossiers?.scenarioExpressionPlan?.questionExpressions
       ?.find((item) => item.primaryQuestionId === primaryQuestionId);
     // Scope the neutral evidence packet to this question's term(s) so each turn's

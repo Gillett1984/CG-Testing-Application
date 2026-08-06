@@ -9,6 +9,9 @@
     "newCaseLink": "a[href=\"/request/new\"]",
     "participantNameInput": "input[type=\"text\"]",
     "participantEmailInput": "input[type=\"email\"]",
+    "employeeNameInput": "#party1-name",
+    "employeeEmailInput": "#party1-email",
+    "managerSelect": "#party2-participant",
     "createCaseButton": "button[type=\"submit\"]",
     "caseHeading": "h1, h2, h3",
     "startGettingStartedButton": "button:has-text(\"Getting Started\")"

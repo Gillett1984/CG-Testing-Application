@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "topicId": "raise",
+  "alignmentScenarioId": "well_aligned_outstanding",
+  "name": "BrightPath CSM - Raise Aligned",
+  "description": "Aligned raise request. Customer Success Manager and Director of Customer Success largely agree that the raise is justified by expanded scope, strong results, and market position, with a shared understanding that the exact figure and timing need to be worked through against budget and pay bands.",
+  "answers": [
+    {
+      "primaryQuestionId": "raise_q1_amount_timing",
+      "employee": "I'm requesting a 12% increase to my base salary, which would bring me in line with the market rate for a Customer Success Manager handling an enterprise-inclusive book. Alongside base, I'd like us to review my annual bonus target, which hasn't changed since I joined. I'd want the change to take effect from the start of the next quarter, which lines up with our normal review cycle and with when the two enterprise accounts I absorbed became a permanent part of my role.",
+      "manager": "The employee is requesting a 12% increase to base salary to align with the market rate for a Customer Success Manager carrying an enterprise-inclusive book. They've also asked to review their annual bonus target, which hasn't been adjusted since they joined. The requested effective date is the start of the next quarter, which fits our normal review cycle and matches when the two enterprise accounts became a permanent part of their role."
+    },
+    {
+      "primaryQuestionId": "raise_q2_justification",
+      "employee": "The request is justified on three fronts. On role, I've taken on two enterprise accounts on top of my existing 40 mid-market accounts, so the scope is now beyond my original grade. On market, similar CSM roles handling enterprise books pay roughly 10 to 15% more than my current base. On performance, I delivered a 94% renewal rate against a 92% target and kept churn at 3.8%, protecting around $2.1M in recurring revenue. The 12% figure sits within that market gap, and I'd want it effective next quarter because that's when the expanded scope became permanent.",
+      "manager": "The request is justified on three fronts. On role, the employee absorbed two enterprise accounts on top of their existing mid-market book, pushing the scope beyond their original grade. On market, comparable enterprise-inclusive CSM roles pay roughly 10 to 15% more than their current base. On performance, they delivered a 94% renewal rate against a 92% target and held churn at 3.8%, protecting about $2.1M in recurring revenue. The 12% request falls within that market gap, and the next-quarter timing aligns with when the expanded scope became permanent."
+    },
+    {
+      "primaryQuestionId": "raise_q3_fairness",
+      "employee": "The request fits our compensation approach fairly. The timing lines up with the normal quarterly review cycle, so it's not off-schedule, and 12% would move me into the pay band that matches an enterprise-inclusive role rather than above it. It wouldn't put undue stress on the budget, since it's a smaller cost than hiring separately for the enterprise work I absorbed. It would be equitable relative to peers doing comparable enterprise books, and it sits within market rates for this role in our region.",
+      "manager": "The request is broadly fair against our compensation framework. The timing fits the quarterly review cycle, and a 12% increase would place the employee in the pay band matching an enterprise-inclusive role rather than beyond it. It's a manageable budget cost, especially set against the alternative of resourcing the enterprise work separately. It's consistent with peers holding comparable books, and it fits market rates for the role in our region. The main thing I'd confirm is exact band placement before finalizing."
+    },
+    {
+      "primaryQuestionId": "raise_q4_work_performance",
+      "employee": "My main goals were protecting renewals, keeping churn low, and improving adoption across my portfolio. I delivered a 94% renewal rate against a 92% target, kept churn at 3.8% under the 5% goal, and raised average adoption scores by 12 points. I personally led the save of two at-risk enterprise accounts through tailored value reviews and coordination with product. I did all of this while absorbing the two new enterprise accounts without dropping performance on my existing book, which is the clearest evidence I'm operating above my original grade.",
+      "manager": "The employee's goals were protecting renewals, keeping churn low, and improving adoption. They delivered a 94% renewal rate against a 92% target, held churn at 3.8% under the 5% goal, and improved adoption scores by about 12 points. They personally led the save of two at-risk enterprise accounts through tailored value reviews and coordination with product. Critically, they did this while absorbing two new enterprise accounts without any drop on their existing book, which demonstrates they're already performing above their original grade."
+    },
+    {
+      "primaryQuestionId": "raise_q5_professionalism",
+      "employee": "My professionalism has been consistent. I communicate clearly and regularly with my manager through weekly one-on-ones and prompt updates on urgent account risks, and I collaborate well with support and product through shared channels. I'm reliable on my commitments, and the team knows they can count on the accounts I own. My attitude stayed steady through a heavier workload after taking on the enterprise accounts, and I keep things professional and constructive with both customers and internal teams.",
+      "manager": "The employee's professionalism is consistent and strong. They communicate clearly and regularly with me and collaborate well with support and product through shared channels. They're reliable on commitments, and the team depends on the accounts they own. Their attitude stayed steady through the heavier workload after absorbing the enterprise accounts, and they remain professional and constructive with customers and colleagues alike."
+    },
+    {
+      "primaryQuestionId": "raise_q6_constraints",
+      "employee": "I realistically expect a few constraints. On policy, there may be a limit on how large an increase can go through in a single cycle, which could cap what's approved now. On procedure, an increase of this size likely needs sign-off above my manager, which adds time before it takes effect. On budget, depending on where we are in the cycle, some funds may already be committed. On perception, peers who don't see the enterprise scope I've taken on might view it as inequitable. I'd address that by being open about the added responsibility.",
+      "manager": "There are a few realistic constraints. On policy, there may be a cap on how large a single-cycle increase can be, which could limit what's approved now. On procedure, an increase of this size would need sign-off above me, adding time. On budget, some of this cycle's funds may already be committed depending on timing. On perception, peers without visibility of the employee's expanded enterprise scope might see it as inequitable, though that's manageable by being transparent about the added responsibility."
+    },
+    {
+      "primaryQuestionId": "raise_q7_alternatives",
+      "employee": "If the full 12% isn't possible right away, my must-have is that base pay moves meaningfully now. I'd be open to alternatives on the rest: a one-off bonus to bridge the gap this cycle, splitting the increase across two reviews with part now and the remainder next cycle, or performance triggers tied to renewal and churn targets that unlock the remaining portion. I'd also accept a slightly later effective date if that made the full amount possible. The priority is meaningful movement on base plus a clear path to the rest.",
+      "manager": "If the full 12% can't be approved at once, the reasonable path is meaningful movement on base now with alternatives on the rest. Options include a one-off bonus to bridge this cycle, splitting the increase across two reviews with part now and the remainder next cycle, or performance triggers tied to renewal and churn targets that release the remaining portion. A slightly later effective date could also help fit it within budget. Both of us are aligned that the priority is meaningful base movement plus a defined path to the full amount."
+    }
+  ]
+}

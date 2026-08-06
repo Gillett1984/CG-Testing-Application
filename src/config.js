@@ -29,6 +29,7 @@ const envSchema = z.object({
 const runConfigSchema = z.object({
   topic: z.string().optional(),
   caseType: z.string().optional(),
+  requestorRole: z.enum(['employee', 'manager']).optional(),
   runMode: z.enum(['requestor_getting_started', 'participant_getting_started', 'full_workflow', 'fact_labeling_smoke']).optional(),
   existingCaseId: z.string().optional(),
   factRatingStage: z.enum(['requestor_own', 'participant_rates_requestor', 'participant_own', 'requestor_rates_participant']).optional(),
@@ -144,6 +145,8 @@ export function loadConfig(args) {
     run: {
       topic: cli.topic ?? runConfig.topic ?? 'Synthetic test topic',
       caseType: cli.caseType ?? runConfig.caseType ?? cli.topic ?? runConfig.topic ?? 'Raise',
+      requestorRole: cli.requestorRole ?? runConfig.requestorRole
+        ?? defaultRequestorRole(cli.caseType ?? runConfig.caseType ?? cli.topic ?? runConfig.topic ?? 'Raise'),
       runMode,
       existingCaseId,
       factRatingStage: cli.factRatingStage ?? runConfig.factRatingStage ?? 'participant_rates_requestor',
@@ -195,6 +198,7 @@ function parseArgs(args) {
     if (arg === '--config') parsed.configPath = args[index + 1];
     if (arg === '--topic') parsed.topic = args[index + 1];
     if (arg === '--case-type') parsed.caseType = args[index + 1];
+    if (arg === '--requestor-role') parsed.requestorRole = args[index + 1];
     if (arg === '--run-mode') parsed.runMode = args[index + 1];
     if (arg === '--existing-case-id') parsed.existingCaseId = args[index + 1];
     if (arg === '--fact-rating-stage') parsed.factRatingStage = args[index + 1];
@@ -263,4 +267,18 @@ function defaultQualityCriteriaPath(caseType) {
   const fileName = `${caseType.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.json`;
   const candidate = path.join('config', 'case-types', fileName);
   return fs.existsSync(path.resolve(rootDir, candidate)) ? candidate : null;
+}
+
+// Per-topic default for which role the requestor holds — not a single global default.
+// Performance Review is manager-initiated (requestor = manager); a Raise Request is
+// employee-initiated in the natural case (requestor = employee, asking their manager).
+// Each is overridable per run (--requestor-role / runConfig.requestorRole) because a Raise
+// can be initiated from either side (e.g. a manager-role account creating one on staging).
+const REQUESTOR_ROLE_BY_CASE_TYPE = [
+  { pattern: /performance|review|coaching|evaluation|90.?day/i, role: 'manager' },
+  { pattern: /raise/i, role: 'employee' }
+];
+function defaultRequestorRole(caseType = '') {
+  const hit = REQUESTOR_ROLE_BY_CASE_TYPE.find((entry) => entry.pattern.test(String(caseType)));
+  return hit ? hit.role : 'manager';
 }

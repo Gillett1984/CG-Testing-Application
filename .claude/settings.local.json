@@ -50,7 +50,9 @@
       "Bash(awk -F: '$1<540 || /runFullWorkflow/')",
       "Bash(echo \"node exit code: $?\")",
       "Bash(grep -n \"syntheticCase.reference\\\\|reference:\\\\|caseSeed\\\\|seed: \\\\`\" src/commonGroundAutomation.js src/syntheticData.js)",
-      "Bash(echo \"exit: $?\")"
+      "Bash(echo \"exit: $?\")",
+      "Bash(awk 'NR<=194 && /^\\(async \\)?function |runFactStatementStage|^  async /{line=NR\": \"$0} END{}' src/commonGroundAutomation.js)",
+      "Bash(awk -F: '$1>150 && $1<200')"
     ]
   }
 }

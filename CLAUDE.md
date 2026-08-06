@@ -107,18 +107,24 @@ with any `workflowScope`. Mechanics:
   cross-party fact labels and the record-only expected range — e.g. an aligned
   file sets `well_aligned_outstanding` so cross-facts label "Confident Fact"
   instead of "Opinion". Precedence: `--alignment-scenario` CLI flag > scripted
-  file > runConfig > topic default; a runConfig override logs a warning. In the
-  live app the
-  requestor who created the case is the Employee (first-person self-evaluation) and
-  the invited participant is the Manager (third-person), so `employee` is
-  used for the **requestor** and `manager` for the **participant** (see
-  `src/scriptedAnswers.js`, schema in `src/scenarioSchemas.js`). Confirmed 2026-07-16
-  from Common Ground's own prompts, which ask the requestor about "your performance"
-  and what "you delivered". The LLM follow-up
-  perspective uses this same mapping in both scripted and scenario modes
-  (`resolveActorPerspective` in `src/llmResponder.js`), and scripted follow-ups are
-  grounded in the transcript rather than the scenario dossier so the interviewee's
-  role stays consistent. The example file documents the shape.
+  file > runConfig > topic default; a runConfig override logs a warning.
+
+  **Actor ↔ domain-role mapping is per-topic, not a fixed assumption.** Which actor
+  is the Employee (first-person self-assessment) vs. the Manager (third-person
+  evaluation) depends on `config.run.requestorRole`, resolved in `src/config.js`:
+  Performance Review is manager-initiated (**requestor = manager**), while a Raise is
+  employee-initiated (**requestor = employee**). Override per run with
+  `--requestor-role <employee|manager>` or runConfig `requestorRole`, since a Raise can
+  be created from either side (e.g. a manager-role account on staging created one where
+  the requestor was assigned Manager). Scripted files stay keyed by `employee`/`manager`
+  (invariant to who the requestor is); the actor→key routing is centralized in
+  `src/roleMapping.js` (`domainRoleForActor`) and used identically by
+  `resolveActorPerspective` (`src/llmResponder.js`), `pickScriptedAnswer`
+  (`src/scriptedAnswers.js`), and the actor→dossier mapping in `src/scenarioController.js`.
+  (This replaces the pre-2026-08 assumption that the requestor was always the Employee;
+  Common Ground re-architected Performance Review to be created from the manager side.)
+  Scripted follow-ups are grounded in the transcript rather than the scenario dossier so
+  the interviewee's role stays consistent. The example file documents the shape.
 - The live Common Ground prompt is matched to a `primaryQuestionId` with the same
   fuzzy matcher used for scenario turns (`src/questionMatching.js`,
   `matchScenarioQuestionScored`). Manager questions mirror the employee questions,
