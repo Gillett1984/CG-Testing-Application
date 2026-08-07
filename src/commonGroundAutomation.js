@@ -7,7 +7,12 @@ import { createScenarioController } from './scenarioController.js';
 import { matchScenarioQuestion, matchScenarioQuestionScored, matchScenarioCriterion, textSimilarity } from './questionMatching.js';
 import { pickScriptedAnswer } from './scriptedAnswers.js';
 
+// Set once at run entry so deep helpers can drop diagnostic screenshots into the run's
+// results dir without threading `store` through every open-case call site.
+let activeRunDir = null;
+
 export async function runAutomation(config, store, options = {}) {
+  activeRunDir = store?.runDir ?? null;
   if (config.run.runMode !== 'fact_labeling_smoke') await verifyOpenAiConnectivity(config.llm);
   const browser = await chromium.launch(config.browser);
   const persona = options.persona ?? null;
@@ -617,14 +622,17 @@ async function gotoWithRetry(page, url, options = {}) {
   throw new Error(`Navigation to ${url} failed after ${attempts} attempts: ${lastError?.message}`);
 }
 
-// The login form is client-rendered, so #email can appear well after domcontentloaded.
-// Returns true once it is visible, false if it never shows within the timeout — the
-// caller decides whether to fall back to another entry path.
-async function waitForLoginForm(page, emailSelector, timeoutMs = 20000) {
-  return page.locator(emailSelector).first()
-    .waitFor({ state: 'visible', timeout: timeoutMs })
-    .then(() => true)
-    .catch(() => false);
+// The login form renders behind a "Loading…" spinner, and staging may redirect
+// /dashboard → /login?message=login_required&redirect=… (with a "Please log in to continue."
+// banner) when logged out. On a cold/fresh context the spinner can persist for a while, so
+// wait patiently for the ACTUAL #email field — through the spinner and regardless of the
+// /login URL variant — then confirm it is interactable (editable), not just present, before
+// the caller types into it. Returns false if the field never becomes usable in time.
+async function waitForLoginForm(page, emailSelector, timeoutMs = 60000) {
+  const field = page.locator(emailSelector).first();
+  const appeared = await field.waitFor({ state: 'visible', timeout: timeoutMs }).then(() => true).catch(() => false);
+  if (!appeared) return false;
+  return field.isEditable({ timeout: 5000 }).catch(() => false);
 }
 
 // COMMON_GROUND_URL may land on the marketing landing page or the corporate signup page
@@ -636,7 +644,9 @@ async function waitForLoginForm(page, emailSelector, timeoutMs = 20000) {
 async function ensureLoginForm(page, config, selectors, role, store) {
   const loginUrl = new URL('/login', config.productionUrl).toString();
 
-  // Primary: navigate straight to /login and wait for the form to hydrate.
+  // Primary: navigate straight to /login (staging may redirect to
+  // /login?message=login_required&redirect=… when logged out) and wait patiently for the
+  // form to render past the "Loading…" spinner — do NOT bail on the spinner.
   await gotoWithRetry(page, loginUrl, { timeout: 60000 });
   if (await waitForLoginForm(page, selectors.emailInput)) return;
 
@@ -647,13 +657,12 @@ async function ensureLoginForm(page, config, selectors, role, store) {
     .first();
   if (await loginLink.isVisible({ timeout: 5000 }).catch(() => false)) {
     await loginLink.click().catch(() => {});
-    await waitForIdle(page);
-    if (await waitForLoginForm(page, selectors.emailInput)) return;
+    if (await waitForLoginForm(page, selectors.emailInput, 20000)) return;
   }
 
   // Last resort: one more direct /login attempt (covers a slow first hydration).
   await gotoWithRetry(page, loginUrl, { timeout: 60000 });
-  if (await waitForLoginForm(page, selectors.emailInput)) return;
+  if (await waitForLoginForm(page, selectors.emailInput, 20000)) return;
 
   const shot = `${store?.runDir ?? '.'}/login-page-not-reachable-${role}.png`;
   await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
@@ -666,31 +675,99 @@ async function ensureLoginForm(page, config, selectors, role, store) {
 
 async function login(page, config, role, store) {
   const selectors = config.selectors.auth;
-  const credentials = config.credentials[role];
 
   await ensureLoginForm(page, config, selectors, role, store);
-  await fill(page, selectors.emailInput, credentials.email, `${role} email`);
-  await fill(page, selectors.passwordInput, credentials.password, `${role} password`);
-  await click(page, selectors.submitButton, `${role} login submit`);
-  await waitForIdle(page);
+  await submitLoginForm(page, config, selectors, role);
   await assertLoggedIn(page, config, role);
   await verifyAuthenticatedRoute(page, config, role);
 }
 
+// Fill credentials and submit, confirming the submit actually registered. The app stores a
+// JWT access_token in sessionStorage on a successful POST /auth/login — THAT, not the URL
+// changing, is the real "logged in" signal (the SPA can flip the URL to /dashboard before
+// the token is written and then bounce back to /login). This: (3) confirms each field
+// retains its typed value (a hydration reset can clear it), (2) clicks Submit — and from the
+// second attempt also presses Enter in the password field as an alternative submit path,
+// (1) waits for sessionStorage.access_token to be stored as the success signal, and (4) logs
+// each attempt (whether the click fired and whether the token was stored).
+async function submitLoginForm(page, config, selectors, role) {
+  const credentials = config.credentials[role];
+  const passwordField = page.locator(selectors.passwordInput).first();
+  const submitButton = page.locator(selectors.submitButton).first();
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    // (3) Type and verify the values stuck before submitting.
+    await fillAndConfirm(page, page.locator(selectors.emailInput).first(), credentials.email, `${role} email`);
+    await fillAndConfirm(page, passwordField, credentials.password, `${role} password`);
+
+    // Click Submit. The "Please log in to continue." banner shifts it down, so scroll it
+    // into view and let Playwright click the settled element.
+    await submitButton.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
+    await submitButton.scrollIntoViewIfNeeded().catch(() => {});
+    let clickFired = true;
+    await submitButton.click({ timeout: 10000 })
+      .catch((error) => { clickFired = false; console.warn(`[login] ${role} submit click did not fire (attempt ${attempt}): ${error.message}`); });
+
+    // (2) Alternative submit path from the second attempt onward: Enter in the password field.
+    if (attempt >= 2) await passwordField.press('Enter').catch(() => {});
+
+    // (1) Registered once the auth token is stored — the login network response completed and
+    // the session is persisted, so it survives the navigation to the dashboard.
+    const tokenStored = await waitForAuthToken(page, 12000);
+
+    // (4) Log the outcome — distinguishes "click fired but no auth" from "click never fired".
+    console.log(`[login] ${role} submit attempt ${attempt}: clickFired=${clickFired}, accessTokenStored=${tokenStored}, url=${page.url()}`);
+    if (tokenStored) return;
+
+    if (attempt < 3) await page.waitForTimeout(1000); // let the SPA finish hydrating, then retry
+  }
+}
+
+// Type a value into a field and confirm it stuck — a hydration reset on the login form can
+// clear a controlled input right after typing, so re-fill until inputValue matches (bounded).
+async function fillAndConfirm(page, field, value, label) {
+  for (let i = 1; i <= 3; i += 1) {
+    await field.fill(value).catch(() => {});
+    if ((await field.inputValue().catch(() => '')) === value) return true;
+    await page.waitForTimeout(300);
+  }
+  console.warn(`[login] ${label} did not retain its value after typing (a hydration reset may be clearing the field).`);
+  return false;
+}
+
+// The app authenticates via JWTs in sessionStorage (access_token / refresh_token), not
+// cookies — session holds on refresh because the dashboard's auth guard reads
+// sessionStorage.access_token. Poll for that token as the definitive "login succeeded"
+// signal after submit.
+async function hasAuthToken(page) {
+  return page.evaluate(() => {
+    try { return !!sessionStorage.getItem('access_token'); } catch { return false; }
+  }).catch(() => false);
+}
+
+async function waitForAuthToken(page, timeoutMs = 12000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await hasAuthToken(page)) return true;
+    await page.waitForTimeout(200);
+  }
+  return false;
+}
+
 async function logout(page, config) {
   await click(page, config.selectors.auth.logoutButton, 'logout');
-  await page.waitForLoadState('networkidle').catch(() => {});
+  await waitForIdle(page);
 }
 
 async function createCase(page, config, syntheticCase, store) {
   const selectors = config.selectors.requestor;
 
   await page.goto(new URL('/dashboard', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' });
-  await page.waitForLoadState('networkidle').catch(() => {});
+  await waitForDiscussionsLoaded(page);
   const existingCaseIds = findCaseIdsInText(await readVisibleBodyText(page));
 
   await page.goto(new URL('/request/new', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' });
-  await page.waitForLoadState('networkidle').catch(() => {});
+  await waitForIdle(page);
   await assertNotLoginRequired(page, 'open new case page');
   await selectCaseType(page, syntheticCase.caseType);
   // Fill every present date with today, then populate the two parties. The redesigned
@@ -700,7 +777,7 @@ async function createCase(page, config, syntheticCase, store) {
   await fillPresentDates(page, todayIso());
   await fillCaseParties(page, selectors, config, syntheticCase, store);
   await click(page, selectors.createCaseButton, 'create case submit');
-  await page.waitForLoadState('networkidle').catch(() => {});
+  await waitForDiscussionsLoaded(page);
   await page.waitForTimeout(2000);
 
   const commonGroundId = await waitForCreatedCaseId(page, config, existingCaseIds);
@@ -747,9 +824,47 @@ async function waitForCreatedCaseId(page, config, existingCaseIds = []) {
 async function acceptCaseRequest(page, config, syntheticCase, createdCase, store) {
   await ensureOnDashboard(page, config);
   await waitForDiscussionsLoaded(page);
-  await clickCaseCardButton(page, createdCase, /Review Invitation|Review|Invitation/i);
-  await waitForIdle(page);
+  await openInvitationReview(page, config, createdCase, store);
   await acceptInvitationAndConfirm(page, config, createdCase, store);
+}
+
+// The redesigned dashboard card no longer has a "Review Invitation" button. Reach the
+// invitation Accept/Decline screen through the new path: open the target case's Discussion
+// Details from its dashboard card (matched by case ID), switch to the Notifications tab on
+// the case page, then click the "Review Invitation" link in the "New Case Invitation"
+// notification. Each step waits for its target control to render (a DOM signal), never
+// networkidle.
+async function openInvitationReview(page, config, createdCase, store) {
+  // 1. Open the case's Discussion Details from its dashboard card (matched by CG-id text).
+  //    clickCaseCardButton already waits on the dashboard via waitForDiscussionsLoaded.
+  await clickCaseCardButton(page, createdCase, /^(Discussion Details|Case Details)$/i);
+  // 2. Switch to the Notifications tab on the case page. It is a <button>; we exclude the
+  //    'link' role so we don't accidentally hit the sidebar's Notifications nav item.
+  await clickInvitationStep(page, store, createdCase, ['tab', 'button'], /^Notifications\b/i,
+    'the Notifications tab on the case page');
+  // 3. Click "Review Invitation" in the New Case Invitation notification.
+  await clickInvitationStep(page, store, createdCase, ['link', 'button'], /Review Invitation/i,
+    'the "Review Invitation" link in the New Case Invitation notification');
+}
+
+// Click the first visible control matching one of the given roles + accessible-name
+// pattern, polling until it renders (the case page and its notifications hydrate after
+// navigation). Screenshots and fails cleanly if the control never appears.
+async function clickInvitationStep(page, store, createdCase, roles, namePattern, label, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    for (const role of roles) {
+      const control = page.getByRole(role, { name: namePattern }).first();
+      if (await control.isVisible({ timeout: 500 }).catch(() => false)) {
+        await control.click().catch(() => {});
+        return;
+      }
+    }
+    await page.waitForTimeout(400);
+  }
+  const shot = `${store?.runDir ?? '.'}/accept-invitation-step-not-found.png`;
+  await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
+  throw new Error(`Could not find ${label} for ${createdCase?.commonGroundId ?? 'the case'} while accepting the invitation. The invitation flow may have changed again. Screenshot: ${shot}`);
 }
 
 // The invitation review page (/request-review) hydrates after network-idle, so an Accept
@@ -775,8 +890,7 @@ async function acceptInvitationAndConfirm(page, config, createdCase, store) {
       await ensureOnDashboard(page, config);
       await waitForDiscussionsLoaded(page);
       if (await caseIsActive(page, config, createdCase)) return;
-      await clickCaseCardButton(page, createdCase, /Review Invitation|Review|Invitation/i).catch(() => {});
-      await waitForIdle(page);
+      await openInvitationReview(page, config, createdCase, store).catch(() => {});
     }
   }
   const shot = `${store.runDir}/accept-invitation-failed.png`;
@@ -829,31 +943,46 @@ async function openCaseAsParticipant(page, config, createdCase, syntheticCase) {
 }
 
 async function startGettingStarted(page, config, createdCase) {
+  // Try the Getting Started action on the current page first (case detail page / interview).
+  if (await clickGettingStartedAction(page)) return;
+
+  // Not here — open the case's Discussion Details (always present) to reach its detail page,
+  // then look for the action there, rather than matching the card's state-specific "Getting
+  // Started" button on the dashboard.
+  await ensureOnDashboard(page, config);
+  await openCaseFromDashboard(page, createdCase, config.run.caseType);
+  await waitForIdle(page);
+  if (await clickGettingStartedAction(page)) return;
+
+  const dump = await dumpOpenCaseFailure(page, createdCase);
+  throw new Error(
+    `Could not start Getting Started for ${createdCase?.commonGroundId ?? 'the case'}: no Getting Started action on the case detail page. `
+    + `URL: ${page.url()}. Screenshot: ${dump.shot}. Visible text: ${dump.bodyText}`
+  );
+}
+
+// Click the Getting Started / Begin Discussion action on the current page (the case detail
+// page after opening the case, or the interview entry). Returns true if it clicked.
+async function clickGettingStartedAction(page) {
   const directLink = page.locator('a[href*="/get-started"]').first();
   if (await directLink.isVisible({ timeout: 750 }).catch(() => false)) {
-    await directLink.click();
-    await page.waitForLoadState('networkidle').catch(() => {});
+    await directLink.click().catch(() => {});
+    await waitForIdle(page);
     await page.waitForTimeout(2000);
-    return;
+    return true;
   }
   for (const role of ['link', 'button']) {
-    const control = page.getByRole(role, { name: /^(Getting Started|Begin Discussion)$/i }).first();
+    const control = page.getByRole(role, { name: /Getting Started|Begin Discussion/i }).first();
     const visible = await control.isVisible({ timeout: 500 }).catch(() => false);
     const enabled = visible && await control.isEnabled({ timeout: 500 }).catch(() => false);
     if (enabled) {
-      await control.click();
-      await page.waitForLoadState('networkidle').catch(() => {});
+      await control.click().catch(() => {});
+      await waitForIdle(page);
       await page.waitForTimeout(2000);
-      return;
+      return true;
     }
   }
-  if (!isDashboardPage(page.url(), await readVisibleBodyText(page))) {
-    await page.goto(new URL('/dashboard', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' });
-    await page.waitForLoadState('networkidle').catch(() => {});
-  }
-  await clickCaseCardButton(page, createdCase, /Getting Started|Begin Discussion/i);
-  await page.waitForLoadState('networkidle').catch(() => {});
-  await page.waitForTimeout(2000);
+  return false;
 }
 
 class PromptLoopError extends Error {
@@ -1878,7 +2007,7 @@ async function ensureGettingStartedOpen(page, config, createdCase) {
   if (await findReadyResponseInput(page, config.selectors.partnerAi.responseInput, 1000)) return;
   if (!gettingStartedAvailable(text)) {
     await page.goto(new URL('/dashboard', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' });
-    await page.waitForLoadState('networkidle').catch(() => {});
+    await waitForDiscussionsLoaded(page);
     await openCaseFromDashboard(page, createdCase, config.run.caseType);
     text = await readVisibleBodyText(page);
   }
@@ -1909,13 +2038,13 @@ async function openCaseAlignmentReport(page, config, createdCase) {
     const control = page.getByRole(role, { name: namePattern }).first();
     if (await control.isVisible({ timeout: 750 }).catch(() => false)) {
       await control.click().catch(() => {});
-      await page.waitForLoadState('networkidle').catch(() => {});
+      await waitForIdle(page);
       return;
     }
   }
-  // Last resort: case-card scoped click (still verified by reportMatchesCase).
-  await clickCaseCardButton(page, createdCase, namePattern).catch(() => {});
-  await page.waitForLoadState('networkidle').catch(() => {});
+  // The report link lives on the case detail page (reached via openCaseFromDashboard above);
+  // no dashboard-card fallback — matching a state-specific card button is fragile and can
+  // open the wrong case's report.
 }
 
 async function waitForAndReadAlignmentReport(page, config, createdCase) {
@@ -2470,7 +2599,7 @@ function isPostInterviewState(text) {
 }
 
 function isProcessingState(text) {
-  return /checking engagement|engagement levels?|still processing|processing your|analy[sz]ing|please wait|one moment|understanding your intent|understanding your response|saving your response|saving your answer|\d+\s*%\s*complete|thinking…|thinking\.\.\./i.test(String(text ?? ''));
+  return /checking engagement|engagement levels?|still processing|processing your|analy[sz]ing|please wait|one moment|understanding your intent|understanding your response|saving your response|saving your answer|\d+\s*%\s*complete|thinking…|thinking\.\.\.|\bloading\b/i.test(String(text ?? ''));
 }
 
 function otherPartyGate(text) {
@@ -2910,26 +3039,44 @@ async function waitForIdle(page, ms = 6000) {
 async function ensureOnDashboard(page, config) {
   if (isDashboardPage(page.url(), await readVisibleBodyText(page))) return;
   await page.goto(new URL('/dashboard', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' });
-  await waitForIdle(page);
+  await waitForDiscussionsLoaded(page);
 }
 
 async function assertLoggedIn(page, config, role) {
-  const deadline = Date.now() + 60000;
-  let lastText = '';
-  await waitForIdle(page);
+  const dashUrl = new URL('/dashboard', config.productionUrl).toString();
 
-  while (Date.now() < deadline) {
-    const text = await readVisibleBodyText(page);
-    lastText = text;
-    if (/dashboard|account|notifications|create new case/i.test(text)) return;
-    if (/\?message=login_required|login_required/i.test(page.url())) break;
-    await page.waitForTimeout(1000);
+  // (4) Log whether the auth token is present before we head to the dashboard.
+  console.log(`[login] ${role} post-submit: accessTokenStored=${await hasAuthToken(page)}, url=${page.url()}`);
+
+  // Now that the token is stored (submitLoginForm confirmed it), drive to /dashboard
+  // ourselves — sessionStorage survives the navigation, so the dashboard's auth guard finds
+  // the token. The SPA's own routing can race the token write and bounce to
+  // /login?message=login_required; if the token is still stored, that is the race, so
+  // re-navigate rather than failing. Bounded so a genuine auth failure still errors out.
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    if (!isDashboardPage(page.url())) {
+      await page.goto(dashUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
+    }
+    // Wait for the dashboard to render past its "Loading…" spinner (raised cap for a slow
+    // cold dashboard). Returns early if we bounced off /dashboard.
+    await waitForDiscussionsLoaded(page, 120000);
+
+    const url = page.url();
+    const tokenStored = await hasAuthToken(page);
+    const bounced = /\?message=login_required|login_required/i.test(url)
+      || (!isDashboardPage(url) && /\/login(?:[/?#]|$)/i.test(url));
+    console.log(`[login] ${role} dashboard settle attempt ${attempt}: url=${url}, accessTokenStored=${tokenStored}, bounced=${bounced}`);
+
+    if (isDashboardPage(url) && !bounced) return;
+    if (!tokenStored) break; // token gone → genuine auth failure; report below
+    await page.waitForTimeout(500); // re-navigate on the next loop
   }
 
-  const compactText = lastText.replace(/\s+/g, ' ').trim();
+  const compactText = (await readVisibleBodyText(page)).replace(/\s+/g, ' ').trim();
   throw new Error([
     `${role} login did not complete before timeout.`,
     `Current URL: ${page.url()}`,
+    `Auth token stored: ${await hasAuthToken(page)}`,
     `Visible page text: ${compactText.slice(0, 1200)}`
   ].join('\n'));
 }
@@ -2938,16 +3085,24 @@ async function verifyAuthenticatedRoute(page, config, role) {
   // Avoid a redundant second dashboard load: login() usually lands here already.
   if (!isDashboardPage(page.url(), await readVisibleBodyText(page))) {
     await page.goto(new URL('/dashboard', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' });
-    await waitForIdle(page);
   }
 
-  const deadline = Date.now() + 30000;
+  const hardDeadline = Date.now() + 120000;
+  let deadline = Date.now() + 30000;
   let lastText = '';
-  while (Date.now() < deadline) {
+  while (Date.now() < deadline && Date.now() < hardDeadline) {
+    // Already on /dashboard → the session is valid; wait for it to finish rendering (cards /
+    // empty-state) via waitForDiscussionsLoaded with a raised cap, rather than failing on the
+    // "Loading…" spinner.
+    if (isDashboardPage(page.url())) {
+      await waitForDiscussionsLoaded(page, 120000);
+      return;
+    }
     const text = await readVisibleBodyText(page);
     lastText = text;
     if (/\?message=login_required|login_required/i.test(page.url())) break;
     if (/dashboard|account|notifications|create new case/i.test(text)) return;
+    if (isProcessingState(text)) deadline = Math.min(Date.now() + 30000, hardDeadline);
     await page.waitForTimeout(1000);
   }
 
@@ -3095,48 +3250,27 @@ function updateArtifactCaseId(artifacts, commonGroundId) {
 }
 
 async function openCaseFromDashboard(page, createdCase, caseType) {
-  // The dashboard fetches its case cards after network-idle ("Loading discussions…"), so
-  // wait for that before searching for the case heading — otherwise the lookup races the
-  // fetch and wrongly concludes the case is absent.
-  await waitForDiscussionsLoaded(page);
-  const headings = page.locator('h1, h2, h3');
-  const headingCount = await headings.count();
-  const targets = caseSearchTargets(createdCase, caseType);
-  const fallbackPattern = caseTypeDashboardPattern(caseType);
-  const requireExactCaseMatch = Boolean(createdCase?.requireExactCaseMatch);
-
-  for (let index = 0; index < headingCount; index += 1) {
-    const heading = headings.nth(index);
-    const text = (await heading.innerText().catch(() => '')).trim();
-    if (targets.some((target) => text.includes(target))) {
-      await heading.click();
-      return;
-    }
+  // Open the case via its "Discussion Details" button — always present on the card
+  // regardless of case state — rather than clicking the (often non-navigating) heading or
+  // matching a state-specific action. clickCaseCardButton finds the card by its CG-id
+  // (waitForCaseCard) and clicks the button within it, landing on the case detail page.
+  try {
+    await clickCaseCardButton(page, createdCase, /^(Discussion Details|Case Details)$/i);
+  } catch (error) {
+    const dump = await dumpOpenCaseFailure(page, createdCase);
+    throw new Error(
+      `Could not open case ${createdCase?.commonGroundId ?? ''} from dashboard: its "Discussion Details" button was not found. `
+      + `URL: ${page.url()}. CG cards on dashboard: ${dump.cgIdsOnDashboard.join(', ') || '(none)'}. `
+      + `Screenshot: ${dump.shot}. Visible text: ${dump.bodyText} (${error.message})`
+    );
   }
-
-  for (const target of targets) {
-    const candidate = page.getByText(target, { exact: false }).first();
-    if (await candidate.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await candidate.click();
-      return;
-    }
-  }
-
-  if (requireExactCaseMatch) {
-    throw new Error(`Could not open existing case ${createdCase.commonGroundId} from dashboard. Refusing to fall back to another case.`);
-  }
-
-  const firstCaseHeading = page.locator('h1, h2, h3').filter({ hasText: fallbackPattern }).first();
-  if (await firstCaseHeading.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await firstCaseHeading.click();
-    return;
-  }
-
-  throw new Error(`Could not open case from dashboard. Tried: ${targets.join(', ')}`);
 }
 
 async function openCaseDetailsFromDashboard(page, createdCase, caseType) {
   if (!isDashboardPage(page.url(), await readVisibleBodyText(page))) return;
+  // Wait for the specific case card before either open path (clickCaseCardButton already
+  // does, and openCaseFromDashboard now does — this makes the gate explicit for both).
+  await waitForCaseCard(page, createdCase);
   const opened = await clickCaseCardButton(page, createdCase, /^(Case Details|Discussion Details)$/i)
     .then(() => true)
     .catch(() => false);
@@ -3144,15 +3278,62 @@ async function openCaseDetailsFromDashboard(page, createdCase, caseType) {
   await openCaseFromDashboard(page, createdCase, caseType);
 }
 
+// Wait for a SPECIFIC case's card to render on the dashboard — identified by its exact
+// CG-id heading, not just any card. With many accumulated cases the dashboard is slow and a
+// just-created case can appear late (rendered below the fold, or not yet in the cached
+// /cases response). Poll for the exact heading with a raised cap, scroll it into view so the
+// click can reach it, and re-fetch the list periodically in case it hasn't propagated yet.
+// Returns true once the heading is present.
+async function waitForCaseCard(page, createdCase, timeoutMs = 60000) {
+  const targets = caseSearchTargets(createdCase).filter(Boolean);
+  if (targets.length === 0) return false;
+  const deadline = Date.now() + timeoutMs;
+  let lastReload = Date.now();
+  while (Date.now() < deadline) {
+    const found = await page.evaluate((targetList) => {
+      const heading = [...document.querySelectorAll('h1,h2,h3')]
+        .find((el) => targetList.some((t) => (el.innerText || '').includes(t)));
+      if (!heading) return false;
+      heading.scrollIntoView({ block: 'center' });
+      return true;
+    }, targets).catch(() => false);
+    if (found) return true;
+    // Re-fetch the discussion list in case the just-created case has not propagated to the
+    // dashboard yet (its /cases fetch may have run before the case was indexed).
+    if (Date.now() - lastReload >= 20000 && isDashboardPage(page.url())) {
+      await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+      await waitForDiscussionsLoaded(page);
+      lastReload = Date.now();
+    }
+    await page.waitForTimeout(500);
+  }
+  return false;
+}
+
+// Diagnostic dump for a "could not open case from dashboard" failure: full-page screenshot
+// plus the visible body text and the CG-ids currently on the dashboard, so we can see
+// whether it was stuck on "Loading…", rendered other cards but not the target, etc.
+async function dumpOpenCaseFailure(page, createdCase) {
+  const body = (await readVisibleBodyText(page)).replace(/\s+/g, ' ').trim();
+  const cgIdsOnDashboard = [...new Set(body.match(/CG-\d{3,4}/g) || [])];
+  const shot = `${activeRunDir ?? '.'}/open-case-failed-${createdCase?.commonGroundId ?? 'case'}.png`;
+  await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
+  return { shot, cgIdsOnDashboard, bodyText: body.slice(0, 1200) };
+}
+
 async function clickCaseCardButton(page, createdCase, buttonPattern) {
+  // Wait for THIS case's card specifically (by its CG-id heading) and scroll it into view
+  // before clicking — not just any card — so a slow/crowded dashboard or a late-rendering
+  // just-created case doesn't cause a "could not find matching case-card button" miss.
+  await waitForCaseCard(page, createdCase);
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
       await clickCaseCardButtonOnce(page, createdCase, buttonPattern);
       return;
     } catch (error) {
       if (attempt >= 2) throw error;
-      // The card may not have hydrated yet ("Loading discussions…"); wait and retry once.
-      await waitForDiscussionsLoaded(page);
+      // Card/button not ready yet; wait for the specific card again and retry once.
+      await waitForCaseCard(page, createdCase, 20000);
       await page.waitForTimeout(500);
     }
   }

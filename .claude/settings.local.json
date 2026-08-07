@@ -52,7 +52,16 @@
       "Bash(grep -n \"syntheticCase.reference\\\\|reference:\\\\|caseSeed\\\\|seed: \\\\`\" src/commonGroundAutomation.js src/syntheticData.js)",
       "Bash(echo \"exit: $?\")",
       "Bash(awk 'NR<=194 && /^\\(async \\)?function |runFactStatementStage|^  async /{line=NR\": \"$0} END{}' src/commonGroundAutomation.js)",
-      "Bash(awk -F: '$1>150 && $1<200')"
+      "Bash(awk -F: '$1>150 && $1<200')",
+      "Bash(sed -n '/function isProcessingState/,/^}/p' src/commonGroundAutomation.js)",
+      "Bash(sed -n '/^async function waitForLoginForm/,/^}/p' src/commonGroundAutomation.js)",
+      "Bash(sed -n '/^async function ensureLoginForm/,/^}/p' src/commonGroundAutomation.js)",
+      "Bash(grep -c \"submit attempt \\\\${attempt}: clickFired\" src/commonGroundAutomation.js)",
+      "Bash(sed -n '/^async function assertLoggedIn/,/^}/p' src/commonGroundAutomation.js)",
+      "Bash(sed -n '/^async function verifyAuthenticatedRoute/,/^}/p' src/commonGroundAutomation.js)",
+      "Bash(sed -n '/^function isDashboardPage/,/^}/p' src/commonGroundAutomation.js)",
+      "Bash(sed -n '/^async function clickCaseCardButton\\(page, createdCase, buttonPattern\\)/,/^}/p' src/commonGroundAutomation.js)",
+      "Bash(sed -n '/^function caseSearchTargets/,/^}/p' src/commonGroundAutomation.js)"
     ]
   }
 }
