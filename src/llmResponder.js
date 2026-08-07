@@ -881,13 +881,17 @@ function classifyTurn(promptContext, transcript = [], qualityCriteria = null) {
     || Boolean(matchedPrimaryInLatestPrompt && !previousPrimaryKey)
     || /let'?s move on to|current primary question/i.test(promptContext.latestPartnerTurn ?? '');
   const hasFollowUpQuestion = Boolean(promptContext.followUpQuestion) && priorSyntheticUserExists && !hasTransitionToPrimary;
+  // Partner AI re-asking a primary question the user already answered is also a follow-up:
+  // it wants more/complete coverage, so it must not be treated as a fresh initial turn.
+  const isFollowUp = hasFollowUpQuestion
+    || (primaryQuestionRepeated(promptContext, transcript) && !hasTransitionToPrimary);
   const inferredPrimaryQuestion = hasPrimaryQuestion
     || (!priorSyntheticUserExists && Boolean(matchedPrimaryQuestion))
     || (!priorSyntheticUserExists && Boolean(activeQuestion))
     || hasTransitionToPrimary;
   return {
-    isPrimaryQuestionTurn: inferredPrimaryQuestion && !hasFollowUpQuestion,
-    isFollowUpTurn: hasFollowUpQuestion,
+    isPrimaryQuestionTurn: inferredPrimaryQuestion && !isFollowUp,
+    isFollowUpTurn: isFollowUp,
     hasPrimaryQuestion: inferredPrimaryQuestion,
     discussionArea: promptContext.discussionArea,
     primaryQuestion: promptContext.primaryQuestion || matchedPrimaryQuestion?.question || '',
@@ -940,6 +944,19 @@ function normalizeForPrimaryMatch(value) {
     .trim();
 }
 
+// True when Partner AI is re-asking a primary question the synthetic user already answered.
+// The current prompt is already the last partnerAi transcript entry when this runs, so the
+// comparison is against EARLIER partner prompts. A re-ask means the prior answer did not
+// satisfy the question (e.g. it left a "Please cover:" sub-point uncovered).
+function primaryQuestionRepeated(promptContext, transcript = []) {
+  if (!transcript.some((entry) => entry.role === 'syntheticUser')) return false;
+  const currentPrimary = normalizeForPrimaryMatch(promptContext.primaryQuestion);
+  if (!currentPrimary) return false;
+  const partnerPrompts = transcript.filter((entry) => entry.role === 'partnerAi');
+  return partnerPrompts.slice(0, -1)
+    .some((entry) => normalizeForPrimaryMatch(entry.promptContext?.primaryQuestion) === currentPrimary);
+}
+
 function normalizeEnum(value, allowed, fallback) {
   const normalized = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
   return allowed.includes(normalized) ? normalized : fallback;
@@ -973,10 +990,14 @@ function personaDirectives(persona, turnClassification) {
 function buildGenerationMessages(input, correction = null) {
   // High-quality primary-question turns must cover all mandatory answer-guidance
   // points in one go; vague/behavior-only/partial turns stay tight.
-  const wantsFullCoverage = input.policyDecision?.useQualityCriteria !== false
-    && input.policyDecision?.quality !== 'low'
-    && input.policyDecision?.specificity !== 'vague'
-    && input.behaviorPlan?.mode !== 'defer';
+  // A recovery/re-ask turn must cover everything Partner AI is asking for so the interview
+  // advances (otherwise the same primary question repeats until the loop-guard fires), so
+  // force full coverage then too — except when a behavior is being deferred.
+  const wantsFullCoverage = input.behaviorPlan?.mode !== 'defer'
+    && (input.isRecoveryTurn
+      || (input.policyDecision?.useQualityCriteria !== false
+        && input.policyDecision?.quality !== 'low'
+        && input.policyDecision?.specificity !== 'vague'));
   const systemContent = [
     'You generate synthetic Requestor/user responses for QA testing a Partner AI interview.',
     'You are the synthetic user for the actorRole and actorPerspective in the input. The actorPerspective defines whose work is being discussed and is authoritative. You are not Partner AI.',
@@ -1933,8 +1954,12 @@ function delay(ms) {
 
 function isRecoveryTurn(promptContext, transcript) {
   const priorUserTurnExists = transcript.some((entry) => entry.role === 'syntheticUser');
+  if (!priorUserTurnExists) return false;
   const activeQuestion = `${promptContext.activeQuestion} ${promptContext.followUpQuestion}`.toLowerCase();
-  return priorUserTurnExists && /can you|could you|provide more|specific|clarify|details|missing|not provided|unmet|help clarify/.test(activeQuestion);
+  if (/can you|could you|provide more|specific|clarify|details|missing|not provided|unmet|help clarify/.test(activeQuestion)) return true;
+  // A re-asked primary question is a recovery signal too: the prior answer left something
+  // uncovered (e.g. a "Please cover:" sub-point), so escalate to a fuller answer.
+  return primaryQuestionRepeated(promptContext, transcript);
 }
 
 function findRelevantCriteria(promptContext, qualityCriteria) {

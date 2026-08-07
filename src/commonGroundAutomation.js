@@ -294,20 +294,29 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   // Avoid an unhandled rejection if browser setup throws before we await it.
   dossiersPromise.catch(() => {});
 
+  // One browser context for the whole workflow instead of a fresh one per phase.
+  // The dashboard's Next.js bundle (`_next/static/chunks/*`) is ~100+ cold assets
+  // that download pathologically slowly on this machine (measured ~12-16s each,
+  // vs sub-second warm) — a separate context per phase re-paid that full cold
+  // download 6× and was the real cause of the dashboard hanging on "Loading…".
+  // A shared context keeps one in-memory HTTP cache, so only phase 1 is cold and
+  // every later phase is warm. Role isolation is preserved by opening a fresh
+  // PAGE per phase (sessionStorage — where the auth Bearer token lives — is
+  // per-tab, so each phase logs in cleanly; the app uses no auth cookies).
+  const sessionContext = await browser.newContext();
+
   recordStage(artifacts, 'Create case', 'started');
-  const requestorSetupContext = await browser.newContext();
-  const requestorSetupPage = await requestorSetupContext.newPage();
+  const requestorSetupPage = await sessionContext.newPage();
   await login(requestorSetupPage, config, 'requestor', store);
   artifacts.case = await createCase(requestorSetupPage, config, syntheticCase, store);
-  await requestorSetupContext.close();
+  await requestorSetupPage.close();
   recordStage(artifacts, 'Create case', 'passed', artifacts.case?.commonGroundId ?? artifacts.case?.syntheticReference ?? '');
 
   recordStage(artifacts, 'Accept participant invitation', 'started');
-  const participantSetupContext = await browser.newContext();
-  const participantSetupPage = await participantSetupContext.newPage();
+  const participantSetupPage = await sessionContext.newPage();
   await login(participantSetupPage, config, 'participant', store);
   await acceptCaseRequest(participantSetupPage, config, syntheticCase, artifacts.case, store);
-  await participantSetupContext.close();
+  await participantSetupPage.close();
   recordStage(artifacts, 'Accept participant invitation', 'passed');
 
   // Common Ground order (confirmed manually on prod, 2026-07-16): the conversation is
@@ -331,8 +340,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   // Steps 3-4: Requestor interview, then Requestor fact section.
   // Open the requestor's case page BEFORE awaiting the dossier, so a real
   // window stays visible during the dossier wait instead of a blank one.
-  const requestorContext = await browser.newContext();
-  const requestorPage = await requestorContext.newPage();
+  const requestorPage = await sessionContext.newPage();
   await login(requestorPage, config, 'requestor', store);
   await openCaseAsRequestor(requestorPage, config, artifacts.case, syntheticCase);
 
@@ -395,15 +403,14 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   );
   recordStage(artifacts, 'Requestor Fact Section', 'passed', `All fact statements labeled ${ownFactLabel}.`);
   await requestorPage.screenshot({ path: `${store.runDir}/requestor-post-processing.png`, fullPage: true });
-  await requestorContext.close();
+  await requestorPage.close();
 
   // Steps 5-8: Participant rates the requestor's facts, waits for Getting Started
   // to become available, then does their own interview and fact section. One
   // participant session covers all four steps. The rating MUST precede the
   // participant's interview: Common Ground will not open Getting Started until the
   // requestor's fact statements have been rated.
-  const participantContext = await browser.newContext();
-  const participantPage = await participantContext.newPage();
+  const participantPage = await sessionContext.newPage();
   await login(participantPage, config, 'participant', store);
   await openCaseAsParticipant(participantPage, config, artifacts.case, syntheticCase);
 
@@ -468,12 +475,11 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   );
   recordStage(artifacts, 'Participant Fact Section', 'passed', `All fact statements labeled ${ownFactLabel}.`);
   await participantPage.screenshot({ path: `${store.runDir}/participant-post-processing.png`, fullPage: true });
-  await participantContext.close();
+  await participantPage.close();
 
   // Step 9: Requestor rates the participant's facts.
   recordStage(artifacts, 'Requestor Rates Participant Facts', 'started');
-  const requestorReviewContext = await browser.newContext();
-  const requestorReviewPage = await requestorReviewContext.newPage();
+  const requestorReviewPage = await sessionContext.newPage();
   await login(requestorReviewPage, config, 'requestor', store);
   await openCaseAsRequestor(requestorReviewPage, config, artifacts.case, syntheticCase);
   await withOtherPartyGateRecovery(
@@ -491,14 +497,13 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   );
   recordStage(artifacts, 'Requestor Rates Participant Facts', 'passed', `Participant facts labeled ${crossPartyFactLabel}.`);
   await requestorReviewPage.screenshot({ path: `${store.runDir}/requestor-rates-participant-facts.png`, fullPage: true });
-  await requestorReviewContext.close();
+  await requestorReviewPage.close();
 
   artifacts.workflowCompleted = true;
   artifacts.workflowCompletionStage = 'Requestor Rates Participant Facts';
 
   recordStage(artifacts, 'Alignment Report', 'started');
-  const reportContext = await browser.newContext();
-  const reportPage = await reportContext.newPage();
+  const reportPage = await sessionContext.newPage();
   let alignmentReportIssue = null;
   try {
     await login(reportPage, config, 'requestor', store);
@@ -535,8 +540,12 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     };
     recordStage(artifacts, 'Alignment Report', 'not_available', `${error.message} (record only)`);
   } finally {
-    await reportContext.close();
+    await reportPage.close();
   }
+
+  // Close the shared workflow context (browser.close() in runAutomation also covers
+  // this on error paths).
+  await sessionContext.close();
 
   const coverage = scenarioController.getCoverageSummary();
   // Behaviors are cleared per turn in scripted mode (see the scenarioTurn.behaviors
@@ -920,7 +929,12 @@ async function caseIsActive(page, config, createdCase) {
 
 // The dashboard fetches its discussions after network-idle, showing "Loading discussions…"
 // meanwhile, so a case-card lookup can race the fetch. Wait for that state to clear.
-async function waitForDiscussionsLoaded(page, timeoutMs = 20000) {
+// Cap defaults to 90s: on a cold context the dashboard's Next.js bundle can take
+// ~30s to download and mount (measured), so the old 20s cap expired mid-load and
+// the caller proceeded against a still-spinning page. This returns as soon as the
+// cards render, so the higher cap only adds headroom for the first cold load and
+// never slows warm loads. With the shared session context, only phase 1 is cold.
+async function waitForDiscussionsLoaded(page, timeoutMs = 90000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const text = await readVisibleBodyText(page);

@@ -90,6 +90,14 @@ function extractLatestPartnerTurn(text) {
   const latestAfterQualityBlock = extractAfterLastQualityBlock(text);
   if (latestAfterQualityBlock) return latestAfterQualityBlock;
 
+  // No QFI block (e.g. the Raise layout): the latest partner message is the text
+  // after the last chat timestamp. Falling through to the header markers below
+  // would keep the sidebar's "Please cover:" guidance block, whose early index
+  // makes extractLatestFollowUpQuestion discard every real conversational
+  // question that follows it — so the responder answers a stale header question.
+  const latestAfterTimestamp = extractAfterLastTimestamp(text);
+  if (latestAfterTimestamp) return latestAfterTimestamp;
+
   const markers = [
     'Current Discussion Area:',
     'Current Primary Question:',
@@ -116,6 +124,23 @@ function extractAfterLastQualityBlock(text) {
   const start = (lastMatch.index ?? 0) + lastMatch[0].length;
   const candidate = text.slice(start).trim();
   if (!candidate || /^Current Discussion Area:/i.test(candidate)) return '';
+
+  return candidate;
+}
+
+function extractAfterLastTimestamp(text) {
+  // Chat bubbles are stamped with a standalone clock token (often doubled, e.g.
+  // "14:32 14:32"). The latest partner message begins right after the last one.
+  const timestampPattern = /(?:^|\s)(\d{1,2}:\d{2}\s*(?:AM|PM)?)(?=\s|$)/gi;
+  const matches = [...text.matchAll(timestampPattern)];
+  const lastMatch = matches.at(-1);
+  if (!lastMatch) return '';
+
+  const start = (lastMatch.index ?? 0) + lastMatch[0].length;
+  const candidate = text.slice(start).trim();
+  if (candidate.length < 15 || /^Current (?:Discussion Area|Primary Question):/i.test(candidate)) {
+    return '';
+  }
 
   return candidate;
 }
