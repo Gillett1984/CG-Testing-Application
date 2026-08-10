@@ -29,11 +29,7 @@ try {
   const context = await browser.newContext();
   const page = await context.newPage();
 
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await page.fill(selectors.auth.emailInput, email);
-  await page.fill(selectors.auth.passwordInput, password);
-  await page.click(selectors.auth.submitButton);
-  await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+  await signIn(page);
 
   const results = [];
   for (const target of targets) {
@@ -44,6 +40,62 @@ try {
   console.log(JSON.stringify(results, null, 2));
 } finally {
   await browser.close();
+}
+
+// The SPA can flip the URL to /dashboard before the auth token is written and then bounce
+// back to /login?message=login_required. Mirror the harness: submit, then drive to
+// /dashboard ourselves, re-navigating while the token is still stored.
+async function signIn(page) {
+  // The site root now serves a marketing landing page (no login form), so navigate to
+  // /login explicitly rather than relying on the root redirecting.
+  await page.goto(new URL('/login', url).toString(), { waitUntil: 'domcontentloaded' });
+
+  const passwordField = page.locator(selectors.auth.passwordInput).first();
+  const submitButton = page.locator(selectors.auth.submitButton).first();
+  const hasTokenNow = () => page.evaluate(() => Boolean(window.sessionStorage.getItem('access_token'))).catch(() => false);
+
+  // The login form is a controlled React input that a hydration pass can clear right after
+  // typing, and the submit click can land before hydration wires it up. Mirror the harness:
+  // re-fill until the value sticks, click, and from attempt 2 also press Enter.
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    for (const [selector, value] of [[selectors.auth.emailInput, email], [selectors.auth.passwordInput, password]]) {
+      const field = page.locator(selector).first();
+      for (let i = 1; i <= 3; i += 1) {
+        await field.fill(value).catch(() => {});
+        if ((await field.inputValue().catch(() => '')) === value) break;
+        await page.waitForTimeout(300);
+      }
+    }
+    await submitButton.scrollIntoViewIfNeeded().catch(() => {});
+    await submitButton.click({ timeout: 10000 }).catch(() => {});
+    if (attempt >= 2) await passwordField.press('Enter').catch(() => {});
+
+    let stored = false;
+    const tokenDeadline = Date.now() + 12000;
+    while (Date.now() < tokenDeadline) {
+      if (await hasTokenNow()) { stored = true; break; }
+      await page.waitForTimeout(300);
+    }
+    console.log(`[inspect] submit attempt ${attempt}: token=${stored}, url=${page.url()}`);
+    if (stored) break;
+    await page.waitForTimeout(1000);
+  }
+
+  const dashUrl = new URL('/dashboard', url).toString();
+  const hasToken = () => page.evaluate(() => Boolean(window.sessionStorage.getItem('access_token'))).catch(() => false);
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    if (!/\/dashboard(?:[/?#]|$)/i.test(page.url())) {
+      await page.goto(dashUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
+    }
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    const bounced = /login_required/i.test(page.url()) || /\/login(?:[/?#]|$)/i.test(page.url());
+    const tokenStored = await hasToken();
+    console.log(`[inspect] login attempt ${attempt}: url=${page.url()}, token=${tokenStored}, bounced=${bounced}`);
+    if (!bounced && /\/dashboard(?:[/?#]|$)/i.test(page.url())) return;
+    if (!tokenStored) break;
+    await page.waitForTimeout(750);
+  }
+  throw new Error(`inspectCaseForm could not reach the dashboard; stuck at ${page.url()}`);
 }
 
 async function inspectForm(page, target) {
@@ -114,9 +166,30 @@ async function inspectForm(page, target) {
       return null;
     };
 
+    // Party 1 / Party 2 are no longer plain inputs on the redesigned form, so also dump
+    // the interactive widgets (buttons, comboboxes, contenteditable) grouped by party —
+    // enumerating only input/textarea/select hides the controls that replaced them.
+    const describe = (element) => ({
+      tag: element.tagName.toLowerCase(),
+      id: element.id || null,
+      type: element.getAttribute('type'),
+      role: element.getAttribute('role'),
+      testid: element.getAttribute('data-testid'),
+      className: (element.getAttribute('class') || '').slice(0, 60) || null,
+      placeholder: element.getAttribute('placeholder'),
+      ariaLabel: element.getAttribute('aria-label'),
+      text: (element.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 60) || null,
+      value: typeof element.value === 'string' ? element.value.slice(0, 40) : null,
+      disabled: Boolean(element.disabled) || element.getAttribute('aria-disabled') === 'true',
+      party: partyContext(element)
+    });
+    const WIDGETS = 'input,textarea,select,button,[role="combobox"],[role="listbox"],[role="button"],[contenteditable="true"]';
+
     return {
       url: window.location.href,
       headings: [...document.querySelectorAll('h1,h2,h3,h4')].filter(visible).map((e) => e.innerText.trim()).filter(Boolean).slice(0, 20),
+      bodyText: (document.body.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 1500),
+      widgets: [...document.querySelectorAll(WIDGETS)].filter(visible).map(describe),
       fields: [...document.querySelectorAll('input,textarea,select')].filter(visible).map((element, index) => ({
         index,
         selector: selectorFor(element),

@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { loadBehaviorSchedule, loadScenarioFoundation } from './scenarioConfig.js';
 import { loadScriptedAnswers, validateScriptedAnswersAgainstTopic } from './scriptedAnswers.js';
 import { loadPersonaCatalog, loadPersonaRotation } from './personas.js';
+import { WORKFLOW_PHASES } from './workflowPhases.js';
 
 dotenv.config();
 
@@ -30,7 +31,8 @@ const runConfigSchema = z.object({
   topic: z.string().optional(),
   caseType: z.string().optional(),
   requestorRole: z.enum(['employee', 'manager']).optional(),
-  runMode: z.enum(['requestor_getting_started', 'participant_getting_started', 'full_workflow', 'fact_labeling_smoke']).optional(),
+  runMode: z.enum(['requestor_getting_started', 'participant_getting_started', 'full_workflow', 'fact_labeling_smoke', 'resume_case']).optional(),
+  resumePhase: z.string().optional(),
   existingCaseId: z.string().optional(),
   factRatingStage: z.enum(['requestor_own', 'participant_rates_requestor', 'participant_own', 'requestor_rates_participant']).optional(),
   workflowScope: z.enum(['requestor', 'participant', 'requestor_participant']).optional(),
@@ -106,11 +108,23 @@ export function loadConfig(args) {
       ? 'participant_getting_started'
       : workflowScopeToRunMode(cli.workflowScope ?? runConfig.workflowScope));
   const runMode = requestedRunMode;
-  const existingCaseId = ['participant_getting_started', 'fact_labeling_smoke'].includes(runMode)
+  const caseIdModes = ['participant_getting_started', 'fact_labeling_smoke', 'resume_case'];
+  const existingCaseId = caseIdModes.includes(runMode)
     ? normalizeCaseId(cli.existingCaseId ?? runConfig.existingCaseId)
     : '';
-  if (['participant_getting_started', 'fact_labeling_smoke'].includes(runMode) && !existingCaseId) {
-    throw new Error(`${runMode === 'fact_labeling_smoke' ? 'Fact Labeling Smoke Test' : 'Participant Getting Started'} mode requires a Common Ground Case ID.`);
+  if (caseIdModes.includes(runMode) && !existingCaseId) {
+    const modeLabel = { fact_labeling_smoke: 'Fact Labeling Smoke Test', resume_case: 'Resume Case' }[runMode] ?? 'Participant Getting Started';
+    throw new Error(`${modeLabel} mode requires a Common Ground Case ID.`);
+  }
+
+  // Resume mode replays the full workflow against an EXISTING case, skipping every phase
+  // before resumePhase. Defaults to the participant interview, the usual restart point
+  // after the requestor side has completed.
+  const resumePhase = runMode === 'resume_case'
+    ? (cli.resumePhase ?? runConfig.resumePhase ?? 'participant_interview')
+    : null;
+  if (resumePhase && !WORKFLOW_PHASES.includes(resumePhase)) {
+    throw new Error(`Unknown --resume-phase "${resumePhase}". Valid phases: ${WORKFLOW_PHASES.join(', ')}.`);
   }
   const workflowScope = runModeToWorkflowScope(runMode);
   const numberOfCases = cli.count ?? runConfig.numberOfCases ?? 1;
@@ -156,6 +170,7 @@ export function loadConfig(args) {
       numberOfCases,
       stopOnFailure,
       resumeRunId: cli.resumeRunId ?? null,
+      resumePhase,
       personas: {
         enabled: personasEnabled,
         catalog: personaCatalog,
@@ -201,6 +216,7 @@ function parseArgs(args) {
     if (arg === '--requestor-role') parsed.requestorRole = args[index + 1];
     if (arg === '--run-mode') parsed.runMode = args[index + 1];
     if (arg === '--existing-case-id') parsed.existingCaseId = args[index + 1];
+    if (arg === '--resume-phase') { parsed.resumePhase = args[index + 1]; parsed.runMode = parsed.runMode ?? 'resume_case'; }
     if (arg === '--fact-rating-stage') parsed.factRatingStage = args[index + 1];
     if (arg === '--workflow-scope') parsed.workflowScope = args[index + 1];
     if (arg === '--test-objective') parsed.testObjective = args[index + 1];
@@ -238,6 +254,7 @@ function workflowScopeToRunMode(workflowScope) {
 }
 
 function runModeToWorkflowScope(runMode) {
+  if (runMode === 'resume_case') return 'requestor_participant';
   if (runMode === 'fact_labeling_smoke') return 'requestor_participant';
   if (runMode === 'participant_getting_started') return 'participant';
   if (runMode === 'full_workflow') return 'requestor_participant';

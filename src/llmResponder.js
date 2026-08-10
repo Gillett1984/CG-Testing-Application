@@ -125,7 +125,7 @@ async function generateOpenAiResponse(context) {
     `Initial issue: ${firstCheck.reason}`,
     `Retry issue: ${revisedCheck.reason}`,
     `Latest Partner AI prompt: ${promptContext.activeQuestion || promptContext.latestPartnerTurn}`,
-    `Retry response: ${revisedText.slice(0, 500)}`,
+    `Retry response (${revisedText.length} chars${revisedText.length > 500 ? ', first 500 shown' : ''}): ${revisedText.slice(0, 500)}${revisedText.length > 500 ? ' […log-truncated, not model-truncated]' : ''}`,
     compactedRetry ? `Compression issue: ${compactedRetry.validation.reason}` : null
   ].filter(Boolean).join('\n'));
 }
@@ -192,7 +192,7 @@ async function generateCheckedResponse(llm, generationInput) {
     `Initial issue: ${firstCheck.reason}`,
     `Retry issue: ${revisedCheck.reason}`,
     `Latest Partner AI prompt: ${generationInput.activePrompt.activeQuestion || generationInput.activePrompt.latestPartnerTurn}`,
-    `Retry response: ${revisedText.slice(0, 500)}`,
+    `Retry response (${revisedText.length} chars${revisedText.length > 500 ? ', first 500 shown' : ''}): ${revisedText.slice(0, 500)}${revisedText.length > 500 ? ' […log-truncated, not model-truncated]' : ''}`,
     compactedRetry ? `Compression issue: ${compactedRetry.validation.reason}` : null
   ].filter(Boolean).join('\n'));
 }
@@ -270,7 +270,8 @@ function buildGenerationInput(context, promptContext, activeQualityCriteria) {
     scenarioTurn: context.scenarioTurn ?? null,
     persona: context.persona ?? null,
     turn: context.turn,
-    priorSyntheticUserFacts: extractPriorUserFacts(context.transcript)
+    priorSyntheticUserFacts: extractPriorUserFacts(context.transcript),
+    alreadyStatedSpecifics: extractStatedSpecifics(context.transcript)
   };
 }
 
@@ -1039,6 +1040,19 @@ function buildGenerationMessages(input, correction = null) {
     'Use varied wording across turns and across cases while preserving the requested test behavior.'
   ];
 
+  // Follow-up turns must ADD, not rephrase. Partner AI re-asks the same point until it
+  // hears a genuinely new specific, so repeating captured figures in new wording costs a
+  // turn and moves progress nowhere. The escape hatch matters too: plainly saying a detail
+  // is not available also lets Partner AI move on, whereas another paraphrase does not.
+  if (input.turnClassification?.isFollowUpTurn) {
+    systemContent.push(
+      'This is a FOLLOW-UP turn. Everything in priorSyntheticUserFacts is already captured; Partner AI is asking because it wants something NEW.',
+      'Add at least one concrete specific that does NOT appear in alreadyStatedSpecifics: a different incident, a named artifact or process, a date or period, a role or stakeholder, a distinct measurement, or a concrete before/after.',
+      'Do not re-serve the values listed in alreadyStatedSpecifics as if they were new information. Reference one only if it is needed to attach the new detail to it, and keep that reference to a few words.',
+      'Never answer by rephrasing your previous answer. If you genuinely have no further specific to give, say so plainly in one sentence and state what would be needed to know it — do not pad with restated claims.'
+    );
+  }
+
   if (input.persona) systemContent.push(...personaDirectives(input.persona, input.turnClassification));
 
   if (input.scenarioTurn) {
@@ -1139,9 +1153,14 @@ async function validateGeneratedResponse(llm, input, candidateResponse) {
           'You are a strict QA judge for a synthetic user response.',
           'Return only valid JSON with keys: pass, reason, correction.',
           'The policyDecision is the highest-priority behavioral control when present.',
-          'The actorPerspective field is authoritative. Do not infer perspective merely from the words Requestor or Participant.',
-          'When actorPerspective is manager_evaluating_employee, a manager response discussing the employee in third person is correct, even though actorRole is participant.',
-          'When actorPerspective is employee_self_assessment, the response should discuss the synthetic user\'s own work in first person.',
+          'The perspectiveContract field is authoritative and final for perspective. Judge perspective ONLY against perspectiveContract.requiredGrammaticalPerson.',
+          'Do not infer perspective from actorRole. Either actor can hold either domain role: for a Raise the requestor is the employee, for a Performance Review the requestor is the manager. actorRole "requestor" does NOT imply manager, and "participant" does NOT imply employee.',
+          'When perspectiveContract.domainRole is manager, a response discussing the employee in third person is correct and required. Never fail it for not using first person.',
+          'When perspectiveContract.domainRole is employee, a response discussing the synthetic user\'s OWN work, performance, and compensation in first person ("I", "my") is correct and required. Never fail it for not using third person, and never say it should be written as a manager evaluating the employee.',
+          'scenarioTurn.scenarioContext facts, sharedFacts, and dossier text are written in neutral third person about "the employee" for BOTH actors. That neutral wording is background context only. It never means the synthetic user is the manager, and a first-person rewrite of those facts is the correct employee response.',
+          'scenarioExpression contains both employeeOpeningStatement/employeePosition and managerOpeningStatement/managerPosition for reference. Only the pair matching perspectiveContract.domainRole applies to this response; the presence of the other pair is not evidence of a perspective error.',
+          'Fail on perspective ONLY if the response is written in the voice described by perspectiveContract.violationLooksLike. If the response matches perspectiveContract.requiredGrammaticalPerson, perspective is correct — do not mention it as a problem.',
+          'Never return pass:false with a reason that also states the response is appropriate, acceptable, or answers the prompt. If the response is acceptable, return pass:true.',
           'Do not fail solely because the assigned scenario rating is implicit, softly worded, or expressed with an equivalent phrase. Rating clarity is handled separately as a soft warning.',
           'Only treat rating direction as a hard problem when the candidate directly contradicts the assigned rating.',
           'If policyDecision.useQualityCriteria is false, do not require high-quality criteria coverage.',
@@ -1165,6 +1184,7 @@ async function validateGeneratedResponse(llm, input, candidateResponse) {
           latestPartnerAiPrompt: input.activePrompt.followUpQuestion || input.activePrompt.activeQuestion || input.activePrompt.latestPartnerTurn,
           actorRole: input.actorRole,
           actorPerspective: input.actorPerspective,
+          perspectiveContract: actorPerspectiveContract(input.actorPerspective),
           activePrompt: input.activePrompt,
           turnClassification: input.turnClassification,
           policyDecision: input.policyDecision,
@@ -1182,7 +1202,8 @@ async function validateGeneratedResponse(llm, input, candidateResponse) {
     response_format: { type: 'json_object' }
   });
 
-  return withValidationWarnings(withBehaviorValidation(parseValidationResult(data), behaviorCheck), styleWarnings);
+  const judgeVerdict = guardPerspectiveVerdict(parseValidationResult(data), input, candidateResponse);
+  return withValidationWarnings(withBehaviorValidation(judgeVerdict, behaviorCheck), styleWarnings);
 }
 
 function isBehaviorOnlyTurn(input) {
@@ -1242,13 +1263,11 @@ export function validateScenarioResponse(input, candidateResponse) {
     });
   }
 
-  if (input.actorPerspective === 'manager_evaluating_employee' && /\b(?:my role|my performance|i need|i would benefit|my development|my manager)\b/.test(response)) {
-    return {
-      pass: false,
-      reason: 'The participant response speaks as the employee instead of as the manager evaluating the employee.',
-      correction: 'Rewrite from the manager perspective. Refer to the employee as the employee, they, or by the synthetic employee name; do not describe the manager as having the employee performance or development need.'
-    };
-  }
+  // Symmetric perspective guard. Both directions are checked the same way, against the
+  // voice the response is actually written in — an employee_self_assessment response is
+  // never failed for speaking in first person about its own work.
+  const perspectiveViolation = detectPerspectiveViolation(input.actorPerspective, candidateResponse);
+  if (perspectiveViolation) return perspectiveViolation;
 
   const immutableFacts = terms.flatMap((term) => term.sharedEvent?.facts ?? []);
   const roleFact = immutableFacts.find((fact) => /employee's role is/i.test(fact));
@@ -1506,6 +1525,110 @@ function withBehaviorValidation(result, behaviorCheck = {}) {
   return {
     ...withValidationWarnings(result, behaviorCheck.warnings ?? []),
     behaviorVerification: behaviorCheck.behaviorVerification ?? []
+  };
+}
+
+// A single explicit statement of who the synthetic user is and which grammatical
+// person they must write in. Passed verbatim to the QA judge so it never has to infer
+// perspective from actorRole ("requestor"/"participant") or from the neutral
+// third-person wording of scenarioContext facts ("The employee has requested ...").
+// Both branches are stated with equal force: a correct employee_self_assessment
+// response is first person and must not be pushed toward a manager voice.
+export function actorPerspectiveContract(actorPerspective) {
+  if (actorPerspective === 'manager_evaluating_employee') {
+    return {
+      actorPerspective: 'manager_evaluating_employee',
+      domainRole: 'manager',
+      speaksAs: 'the manager, evaluating a separate person (the employee)',
+      requiredGrammaticalPerson: 'third person about the employee ("the employee", "they", or the employee name)',
+      correctVoiceExample: 'The employee exceeded the renewal target and protected the enterprise book.',
+      violationLooksLike: 'The synthetic user describes the employee\'s job, performance, development need, or compensation as their own ("my performance", "my raise").',
+      firstPersonAboutOwnWorkIsCorrect: false,
+      note: 'Third person about the employee is REQUIRED and CORRECT here. Never fail this response for not being written in first person.'
+    };
+  }
+  return {
+    actorPerspective: 'employee_self_assessment',
+    domainRole: 'employee',
+    speaksAs: 'the employee, speaking about their own work, their own performance, and their own compensation',
+    requiredGrammaticalPerson: 'first person about themselves ("I", "my", "me")',
+    correctVoiceExample: 'I exceeded my renewal target and protected the enterprise book, so I am asking for a 12% increase effective next quarter.',
+    violationLooksLike: 'The synthetic user talks about "the employee" as a separate third party they are evaluating, instead of speaking as that employee.',
+    firstPersonAboutOwnWorkIsCorrect: true,
+    note: 'First person about the synthetic user\'s own work and compensation is REQUIRED and CORRECT here. Never fail this response for not being written in third person and never ask it to speak as a manager evaluating the employee.'
+  };
+}
+
+// Marker-based classification of which voice a response is actually written in.
+// Used both to hard-fail genuine perspective swaps and to positively confirm that a
+// judge's perspective complaint is unfounded before overriding it.
+const SELF_VOICE_MARKERS = /\b(?:my role|my performance|my work|my own|my development|my manager|my salary|my raise|my base|my current|my goals?|my priorities|my portfolio|my contributions?|my request|i manage|i deliver(?:ed)?|i led|i am responsible|i'm responsible|i improved|i reduced|i exceeded|i achieved|i need|i would benefit|i propose|i suggest|i'm asking|i am asking|i'm requesting|i am requesting)\b/gi;
+const EVALUATOR_VOICE_MARKERS = /\b(?:the employee|this employee|employee's|their role|their performance|their work|their development|as (?:the|their) manager|in my view as (?:the|their) manager|they (?:demonstrated?|struggled?|delivered?|need|require|show)s?)\b/gi;
+
+export function classifyResponseVoice(value) {
+  const text = String(value ?? '');
+  const self = (text.match(SELF_VOICE_MARKERS) ?? []).length;
+  const evaluator = (text.match(EVALUATOR_VOICE_MARKERS) ?? []).length;
+  if (self === 0 && evaluator === 0) return { voice: 'unknown', self, evaluator };
+  if (self > evaluator) return { voice: 'employee', self, evaluator };
+  if (evaluator > self) return { voice: 'manager', self, evaluator };
+  return { voice: 'ambiguous', self, evaluator };
+}
+
+// Deterministic, symmetric perspective guard. Returns null unless the response is
+// clearly written in the OTHER actor's voice. Deliberately conservative: it requires
+// positive evidence of the wrong voice, never a mere absence of the right one.
+export function detectPerspectiveViolation(actorPerspective, candidateResponse) {
+  const contract = actorPerspectiveContract(actorPerspective);
+  const { voice } = classifyResponseVoice(candidateResponse);
+  if (contract.domainRole === 'manager' && voice === 'employee') {
+    return {
+      pass: false,
+      reason: 'The response speaks as the employee about their own work instead of as the manager evaluating the employee.',
+      correction: 'Rewrite from the manager perspective. Refer to the employee as the employee, they, or by the synthetic employee name; do not describe the manager as having the employee performance, development need, or compensation.'
+    };
+  }
+  if (contract.domainRole === 'employee' && voice === 'manager') {
+    return {
+      pass: false,
+      reason: 'The response speaks as a manager evaluating a separate employee instead of as the employee describing their own work.',
+      correction: 'Rewrite in first person as the employee. Say "I" and "my" about your own work, performance, and compensation; do not refer to yourself as "the employee" or evaluate someone else.'
+    };
+  }
+  return null;
+}
+
+// The judge is an LLM and can still hallucinate a perspective failure (e.g. reading the
+// neutral third-person scenario facts as proof the speaker must be a manager). When it
+// fails a response on perspective grounds but the response is positively confirmed to be
+// in the required voice, the verdict is wrong: downgrade it to a recorded warning rather
+// than aborting the case.
+const PERSPECTIVE_FAILURE_PATTERN = /perspective|first[- ]person|third[- ]person|actorperspective|speak(?:s|ing)? as (?:the|a) (?:employee|manager)|from (?:a|the) manager|from (?:the|an) employee/i;
+
+export function guardPerspectiveVerdictForTest(result, input, candidateResponse) {
+  return guardPerspectiveVerdict(result, input, candidateResponse);
+}
+
+function guardPerspectiveVerdict(result, input, candidateResponse) {
+  if (result?.pass !== false) return result;
+  if (!PERSPECTIVE_FAILURE_PATTERN.test(String(result.reason ?? ''))) return result;
+  if (detectPerspectiveViolation(input.actorPerspective, candidateResponse)) return result;
+  const contract = actorPerspectiveContract(input.actorPerspective);
+  const { voice } = classifyResponseVoice(candidateResponse);
+  if (voice !== contract.domainRole) return result;
+  return {
+    ...result,
+    pass: true,
+    reason: `Judge raised a perspective objection that does not hold: the response is already in the required ${contract.domainRole} voice for ${contract.actorPerspective}.`,
+    warnings: [
+      ...(result.warnings ?? []),
+      {
+        type: 'perspective_verdict_override',
+        passed: false,
+        expected: `Judge should accept ${contract.requiredGrammaticalPerson} for ${contract.actorPerspective}.`,
+        observed: `Overrode a false perspective rejection. Judge reason: ${String(result.reason ?? '').slice(0, 300)}`
+      }
+    ]
   };
 }
 
@@ -1888,6 +2011,13 @@ async function createChatCompletion(llm, body) {
         throw new Error('OpenAI response generation returned no text.');
       }
 
+      // finish_reason "length" means max_tokens cut the completion off mid-sentence.
+      // The judge fails visibly-incomplete responses, so surface it instead of leaving
+      // a token-budget truncation to look like an off-target generation.
+      if (data.choices?.[0]?.finish_reason === 'length') {
+        console.warn(`[openai] completion hit the max_tokens limit (${body.max_tokens}) and was truncated mid-output: "...${text.slice(-80)}"`);
+      }
+
       return text;
     } catch (error) {
       if (attempt >= 4 || !isTransientFetchError(error)) {
@@ -1986,6 +2116,30 @@ function extractPriorUserFacts(transcript) {
     .map((entry) => entry.text)
     .join('\n\n')
     .slice(0, 2500);
+}
+
+// The concrete details this actor has ALREADY given. Partner AI keeps drilling until it
+// hears something new, so a follow-up that restates the same figures in fresh wording
+// burns a turn without moving progress. Surfacing these lets the generator be told
+// explicitly what is already captured and must not be re-served as new.
+function extractStatedSpecifics(transcript) {
+  const said = transcript
+    .filter((entry) => entry.role === 'syntheticUser')
+    .map((entry) => String(entry.text ?? ''))
+    .join(' ');
+  const patterns = [
+    /\b\d+(?:\.\d+)?\s*%/g,
+    /\$\s?\d[\d,.]*\s*(?:[KMB]\b|million|billion)?/gi,
+    /\b\d+(?:\.\d+)?\s*(?:accounts?|points?|days?|weeks?|months?|quarters?|hours?|people|reports?|clients?|customers?|sessions?|programs?)\b/gi
+  ];
+  const found = [];
+  for (const pattern of patterns) {
+    for (const match of said.match(pattern) ?? []) {
+      const value = match.replace(/\s+/g, ' ').trim();
+      if (!found.some((existing) => existing.toLowerCase() === value.toLowerCase())) found.push(value);
+    }
+  }
+  return found.slice(0, 30);
 }
 
 function extractText(data) {

@@ -61,7 +61,12 @@
       "Bash(sed -n '/^async function verifyAuthenticatedRoute/,/^}/p' src/commonGroundAutomation.js)",
       "Bash(sed -n '/^function isDashboardPage/,/^}/p' src/commonGroundAutomation.js)",
       "Bash(sed -n '/^async function clickCaseCardButton\\(page, createdCase, buttonPattern\\)/,/^}/p' src/commonGroundAutomation.js)",
-      "Bash(sed -n '/^function caseSearchTargets/,/^}/p' src/commonGroundAutomation.js)"
+      "Bash(sed -n '/^function caseSearchTargets/,/^}/p' src/commonGroundAutomation.js)",
+      "Bash(grep *)",
+      "Bash(tee /private/tmp/claude-501/-Users-machub-cg-testing-tool-CG-Testing-Application/7bf75c84-09b6-415f-9bc0-e137c68dd422/scratchpad/rerun.log)",
+      "Bash(tee /private/tmp/claude-501/-Users-machub-cg-testing-tool-CG-Testing-Application/7bf75c84-09b6-415f-9bc0-e137c68dd422/scratchpad/rerun3.log)",
+      "Bash(pkill -f \"ms-playwright/chromium\")",
+      "Bash(disown)"
     ]
   }
 }

@@ -2,6 +2,7 @@ import { chromium } from 'playwright';
 import { buildSyntheticCase } from './syntheticData.js';
 import { generatePartnerAiResponse, generateScenarioDossiers, verifyOpenAiConnectivity } from './llmResponder.js';
 import { extractPromptContext } from './promptContext.js';
+import { WORKFLOW_PHASES } from './workflowPhases.js';
 import { evaluateManeuverSuccess, evaluatePolicyAdvanceStop, findActiveManeuver } from './testManeuvers.js';
 import { createScenarioController } from './scenarioController.js';
 import { matchScenarioQuestion, matchScenarioQuestionScored, matchScenarioCriterion, textSimilarity } from './questionMatching.js';
@@ -50,7 +51,9 @@ export async function runAutomation(config, store, options = {}) {
       participantEmail: config.credentials.participant.email
     });
 
-    if (config.run.runMode === 'full_workflow') {
+    // resume_case is full_workflow against an existing case: same phases, but everything
+    // before config.run.resumePhase is skipped instead of re-run (and no case is created).
+    if (config.run.runMode === 'full_workflow' || config.run.runMode === 'resume_case') {
       return await runFullWorkflow({ browser, config, store, artifacts, syntheticCase, requestorTranscript, participantTranscript, persona, caseNumber });
     }
 
@@ -305,19 +308,38 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   // per-tab, so each phase logs in cleanly; the app uses no auth cookies).
   const sessionContext = await browser.newContext();
 
-  recordStage(artifacts, 'Create case', 'started');
-  const requestorSetupPage = await sessionContext.newPage();
-  await login(requestorSetupPage, config, 'requestor', store);
-  artifacts.case = await createCase(requestorSetupPage, config, syntheticCase, store);
-  await requestorSetupPage.close();
-  recordStage(artifacts, 'Create case', 'passed', artifacts.case?.commonGroundId ?? artifacts.case?.syntheticReference ?? '');
+  // Resume support: when resuming an existing case, every phase before the resume point
+  // is skipped (it already completed on the live case) and artifacts.case is taken from
+  // config instead of being created. See WORKFLOW_PHASES / shouldRunPhase.
+  const resumePhase = config.run.resumePhase ?? null;
+  const shouldRunPhase = (phase) => !resumePhase || WORKFLOW_PHASES.indexOf(phase) >= WORKFLOW_PHASES.indexOf(resumePhase);
+  const skipPhase = (phase, stageName) => {
+    if (shouldRunPhase(phase)) return false;
+    recordStage(artifacts, stageName, 'skipped', `Resuming at "${resumePhase}"; this phase already completed on the live case.`);
+    return true;
+  };
+  if (resumePhase) {
+    artifacts.case = existingCaseFromConfig(config, syntheticCase);
+    console.log(`[resume] Resuming ${artifacts.case.commonGroundId} at phase "${resumePhase}".`);
+  }
 
-  recordStage(artifacts, 'Accept participant invitation', 'started');
-  const participantSetupPage = await sessionContext.newPage();
-  await login(participantSetupPage, config, 'participant', store);
-  await acceptCaseRequest(participantSetupPage, config, syntheticCase, artifacts.case, store);
-  await participantSetupPage.close();
-  recordStage(artifacts, 'Accept participant invitation', 'passed');
+  if (!skipPhase('create_case', 'Create case')) {
+    recordStage(artifacts, 'Create case', 'started');
+    const requestorSetupPage = await sessionContext.newPage();
+    await login(requestorSetupPage, config, 'requestor', store);
+    artifacts.case = await createCase(requestorSetupPage, config, syntheticCase, store);
+    await requestorSetupPage.close();
+    recordStage(artifacts, 'Create case', 'passed', artifacts.case?.commonGroundId ?? artifacts.case?.syntheticReference ?? '');
+  }
+
+  if (!skipPhase('accept_invitation', 'Accept participant invitation')) {
+    recordStage(artifacts, 'Accept participant invitation', 'started');
+    const participantSetupPage = await sessionContext.newPage();
+    await login(participantSetupPage, config, 'participant', store);
+    await acceptCaseRequest(participantSetupPage, config, syntheticCase, artifacts.case, store);
+    await participantSetupPage.close();
+    recordStage(artifacts, 'Accept participant invitation', 'passed');
+  }
 
   // Common Ground order (confirmed manually on prod, 2026-07-16): the conversation is
   // sequential and gated by requestor/participant role (requestor = creator,
@@ -349,6 +371,8 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   // clicks the link the moment it is visible; the dossier then finishes while
   // Common Ground loads the interview page (it is only needed once we read the
   // first prompt and generate a response, just below).
+  const runRequestorInterview = !skipPhase('requestor_interview', 'Requestor Getting Started');
+  if (runRequestorInterview) {
   recordStage(artifacts, 'Requestor Getting Started', 'started');
   await ensureGettingStartedOpen(requestorPage, config, artifacts.case);
   updateArtifactCaseId(artifacts, await findCaseId(requestorPage));
@@ -391,7 +415,9 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   artifacts.requestorGettingStarted = requestorResult;
   recordStage(artifacts, 'Requestor Getting Started', requestorResult.passed ? 'passed' : 'failed', requestorResult.stopReason);
   if (!requestorResult.passed) throw new Error(requestorResult.stopReason);
+  }
 
+  if (!skipPhase('requestor_facts', 'Requestor Fact Section')) {
   recordStage(artifacts, 'Requestor Fact Section', 'started');
   await withOtherPartyGateRecovery(
     {
@@ -402,6 +428,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     () => completeActorPostProcessing(requestorPage, config, artifacts, 'Requestor', ownFactLabel)
   );
   recordStage(artifacts, 'Requestor Fact Section', 'passed', `All fact statements labeled ${ownFactLabel}.`);
+  }
   await requestorPage.screenshot({ path: `${store.runDir}/requestor-post-processing.png`, fullPage: true });
   await requestorPage.close();
 
@@ -414,6 +441,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   await login(participantPage, config, 'participant', store);
   await openCaseAsParticipant(participantPage, config, artifacts.case, syntheticCase);
 
+  if (!skipPhase('participant_rates_requestor', 'Participant Rates Requestor Facts')) {
   recordStage(artifacts, 'Participant Rates Requestor Facts', 'started');
   await withOtherPartyGateRecovery(
     {
@@ -424,6 +452,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     () => completeParticipantFactReview(participantPage, config, artifacts.case, crossPartyFactLabel)
   );
   recordStage(artifacts, 'Participant Rates Requestor Facts', 'passed', `Requestor facts labeled ${crossPartyFactLabel}.`);
+  }
   await participantPage.screenshot({ path: `${store.runDir}/participant-rates-requestor-facts.png`, fullPage: true });
 
   // Step 6: the Getting Started button does not appear immediately after rating;
@@ -450,6 +479,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   }
   await ensureGettingStartedOpen(participantPage, config, artifacts.case);
 
+  if (!skipPhase('participant_interview', 'Participant Getting Started')) {
   recordStage(artifacts, 'Participant Getting Started', 'started');
   const participantResult = await runPartnerAiInterview(participantPage, config, participantTranscript, {
     seed: `${artifacts.case?.commonGroundId ?? store.runId}:participant`,
@@ -463,7 +493,9 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   artifacts.participantGettingStarted = participantResult;
   recordStage(artifacts, 'Participant Getting Started', participantResult.passed ? 'passed' : 'failed', participantResult.stopReason);
   if (!participantResult.passed) throw new Error(participantResult.stopReason);
+  }
 
+  if (!skipPhase('participant_facts', 'Participant Fact Section')) {
   recordStage(artifacts, 'Participant Fact Section', 'started');
   await withOtherPartyGateRecovery(
     {
@@ -474,10 +506,12 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     () => completeActorPostProcessing(participantPage, config, artifacts, 'Participant', ownFactLabel)
   );
   recordStage(artifacts, 'Participant Fact Section', 'passed', `All fact statements labeled ${ownFactLabel}.`);
+  }
   await participantPage.screenshot({ path: `${store.runDir}/participant-post-processing.png`, fullPage: true });
   await participantPage.close();
 
   // Step 9: Requestor rates the participant's facts.
+  if (!skipPhase('requestor_rates_participant', 'Requestor Rates Participant Facts')) {
   recordStage(artifacts, 'Requestor Rates Participant Facts', 'started');
   const requestorReviewPage = await sessionContext.newPage();
   await login(requestorReviewPage, config, 'requestor', store);
@@ -496,6 +530,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     })
   );
   recordStage(artifacts, 'Requestor Rates Participant Facts', 'passed', `Participant facts labeled ${crossPartyFactLabel}.`);
+  }
   await requestorReviewPage.screenshot({ path: `${store.runDir}/requestor-rates-participant-facts.png`, fullPage: true });
   await requestorReviewPage.close();
 
@@ -779,10 +814,10 @@ async function createCase(page, config, syntheticCase, store) {
   await waitForIdle(page);
   await assertNotLoginRequired(page, 'open new case page');
   await selectCaseType(page, syntheticCase.caseType);
-  // Fill every present date with today, then populate the two parties. The redesigned
-  // New Discussion form replaced the manager's free-text fields with a "Select a
-  // manager" dropdown and no longer auto-fills the requestor's party, so party filling
-  // now branches on whether that dropdown is present (see fillCaseParties).
+  // Fill every present date with today, then settle the two parties. The New Discussion
+  // form has been through three shapes (legacy free-text -> "Select a manager" dropdown ->
+  // both parties auto-resolved and read-only); fillCaseParties detects which one is on
+  // screen and fails loudly if it is none of them.
   await fillPresentDates(page, todayIso());
   await fillCaseParties(page, selectors, config, syntheticCase, store);
   await click(page, selectors.createCaseButton, 'create case submit');
@@ -1008,6 +1043,21 @@ class PromptLoopError extends Error {
   }
 }
 
+// Distinct from PromptLoopError: the page never posted a NEW Partner AI message, so
+// there is no repeated question to speak of — we kept re-reading the same DOM. Naming
+// this separately keeps the artifact honest about which failure actually occurred.
+class PromptStallError extends Error {
+  constructor(count) {
+    super(`Partner AI did not post a new prompt across ${count} consecutive reads — the interview transcript stopped advancing.`);
+    this.name = 'PromptStallError';
+    this.stallCount = count;
+  }
+}
+
+// Ceiling on consecutive turns within a single primary question before the interview is
+// treated as stuck. Real runs use 3-4 follow-ups per primary, so this leaves headroom.
+const MAX_TURNS_PER_PRIMARY_QUESTION = 8;
+
 // Two prompts count as "the same" for the loop guard when their normalized
 // primary-question text is identical or >=95% similar (small QFI-nudge edits
 // still count as a repeat). Cheap early-outs keep the happy path near-zero cost.
@@ -1099,23 +1149,55 @@ async function runPartnerAiInterviewTurns(page, config, transcript, options = {}
   const scriptedAnswers = options.scriptedAnswers ?? null;
   const answeredScriptedQuestions = new Set();
 
-  // Loop-guard state: detect Partner AI re-asking the same primary question.
+  // Loop-guard state: detect Partner AI re-asking the same question verbatim.
   let lastLoopGuardQuestion = null;
   let repeatedPromptCount = 0;
+  // Secondary bound: consecutive turns spent on one primary question.
+  let lastPrimaryQuestion = null;
+  let samePrimaryCount = 0;
+  // Stall state: the answer we last submitted, so a read taken before Partner AI has
+  // replied is never mistaken for a repeated question.
+  let lastSubmittedResponse = null;
+  let stalledPromptCount = 0;
 
   for (let turn = 1; turn <= config.run.maxTurns; turn += 1) {
-    const latestPrompt = await readLatestPrompt(page, config);
+    await dismissTourOverlay(page, `${options.actorRole ?? 'actor'} interview turn ${turn}`);
+    const latestPrompt = await readLatestPrompt(page, config, { afterResponse: lastSubmittedResponse });
     const promptContext = extractPromptContext(latestPrompt);
     if (participantFactRatingRequired(latestPrompt)) {
       throw new Error('Participant Getting Started is not available yet. Common Ground is requiring the participant to rate the requestor fact statements first. Complete the participant fact-statement rating for this case, then rerun Participant Getting Started mode.');
     }
 
-    // Abort if Partner AI re-asks the same primary question for 3 consecutive
-    // turns (e.g. every answer flagged QFI: Low) — otherwise we would generate
-    // new answers indefinitely. Compares only the primary-question text and
-    // resets the moment the question changes, so the happy path (a new question
-    // each turn) costs one cheap comparison.
-    const loopGuardQuestion = promptContext.primaryQuestion || promptContext.activeQuestion || latestPrompt;
+    // Separate "no new prompt" from "same question asked again". A genuine re-ask puts a
+    // new Partner AI message after our last answer; nothing after it means Partner AI has
+    // not replied yet and the extracted question is stale header text.
+    const promptAdvanced = lastSubmittedResponse === null
+      || partnerRepliedAfter(latestPrompt, lastSubmittedResponse);
+    const interviewEnded = isCompletionPrompt(latestPrompt, config.completionPhrases)
+      || isPostInterviewState(latestPrompt);
+    if (!promptAdvanced && !interviewEnded) {
+      stalledPromptCount += 1;
+      console.log(`[prompt-stall] No new Partner AI prompt on read ${stalledPromptCount}; re-reading instead of counting a repeat.`);
+      if (stalledPromptCount >= 3) {
+        const slug = String(options.actorRole ?? 'actor').toLowerCase().replace(/\s+/g, '-');
+        if (options.runDir) {
+          await page.screenshot({ path: `${options.runDir}/prompt-stall-${slug}.png`, fullPage: true }).catch(() => {});
+        }
+        throw new PromptStallError(stalledPromptCount);
+      }
+      continue;
+    }
+    stalledPromptCount = 0;
+
+    // Abort if Partner AI asks the SAME question for 3 consecutive turns (e.g. every
+    // answer flagged QFI: Low) — otherwise we would generate new answers indefinitely.
+    //
+    // Key on the question actually being asked (activeQuestion already prefers the
+    // latest follow-up), NOT on primaryQuestion. A primary question legitimately spans
+    // several follow-up turns while Partner AI drills into it: keying on the primary
+    // counted normal drill-down as a repeat and aborted healthy interviews on the third
+    // follow-up of any question.
+    const loopGuardQuestion = promptContext.activeQuestion || promptContext.primaryQuestion || latestPrompt;
     repeatedPromptCount = (lastLoopGuardQuestion !== null && isSameRepeatedPrompt(lastLoopGuardQuestion, loopGuardQuestion))
       ? repeatedPromptCount + 1
       : 1;
@@ -1127,6 +1209,24 @@ async function runPartnerAiInterviewTurns(page, config, transcript, options = {}
         await page.screenshot({ path: `${options.runDir}/prompt-loop-${slug}.png`, fullPage: true }).catch(() => {});
       }
       throw new PromptLoopError(loopGuardQuestion, repeatedPromptCount);
+    }
+
+    // Secondary bound, preserving the original intent now that the primary question no
+    // longer drives the guard above: if Partner AI never leaves one primary question, the
+    // interview is stuck even though each follow-up is worded differently. Observed runs
+    // use 3-4 follow-ups per primary, so this only trips on a genuine stall.
+    const currentPrimary = promptContext.primaryQuestion || '';
+    samePrimaryCount = (currentPrimary && lastPrimaryQuestion && isSameRepeatedPrompt(lastPrimaryQuestion, currentPrimary))
+      ? samePrimaryCount + 1
+      : 1;
+    lastPrimaryQuestion = currentPrimary;
+    if (currentPrimary && samePrimaryCount >= MAX_TURNS_PER_PRIMARY_QUESTION) {
+      console.log(`[loop-guard] Primary question unchanged for ${samePrimaryCount} turns — aborting.`);
+      const slug = String(options.actorRole ?? 'actor').toLowerCase().replace(/\s+/g, '-');
+      if (options.runDir) {
+        await page.screenshot({ path: `${options.runDir}/prompt-loop-${slug}.png`, fullPage: true }).catch(() => {});
+      }
+      throw new PromptLoopError(currentPrimary, samePrimaryCount);
     }
 
     transcript.push({
@@ -1146,9 +1246,32 @@ async function runPartnerAiInterviewTurns(page, config, transcript, options = {}
       };
     }
 
-    const responseInput = await findReadyResponseInput(page, config.selectors.partnerAi.responseInput, 5000);
+    let responseInput = await findReadyResponseInput(page, config.selectors.partnerAi.responseInput, 5000);
     if (!responseInput) {
-      throw new Error(`Could not find Partner AI response input. Update selector: ${config.selectors.partnerAi.responseInput}`);
+      // The composer is removed/disabled while Partner AI works between turns (e.g.
+      // "Making sure there's enough here to go on…"), which a flat 5s probe reports as a
+      // stale selector. Re-wait through the shared readiness loop, which rolls its
+      // deadline forward while the page is visibly processing.
+      await waitForInterviewReady(page, config, { stageName: interviewStageName });
+      const afterWait = await readVisibleBodyText(page);
+      if (isCompletionPrompt(afterWait, config.completionPhrases) || isPostInterviewState(afterWait)) {
+        return {
+          completed: true,
+          passed: true,
+          stopReason: 'Partner AI indicated Getting Started is complete.',
+          policyStopTriggered: false
+        };
+      }
+      responseInput = await findReadyResponseInput(page, config.selectors.partnerAi.responseInput, 15000);
+    }
+    if (!responseInput) {
+      throw new Error([
+        'Could not find a ready Partner AI response input.',
+        `Selector: ${config.selectors.partnerAi.responseInput} (${await describeResponseInputs(page, config.selectors.partnerAi.responseInput)})`,
+        'If count>0 the selector is fine and the composer was disabled — the page state below says why.',
+        `Current URL: ${page.url()}`,
+        `Last visible page text: ${compactVisibleText(await readVisibleBodyText(page), 1200)}`
+      ].join('\n'));
     }
 
     const scenarioTurn = options.scenarioController
@@ -1173,7 +1296,7 @@ async function runPartnerAiInterviewTurns(page, config, transcript, options = {}
     // by actor. Matching reuses the same fuzzy matcher as scenario turns, with a
     // sequential fallback when the live prompt can't be matched confidently.
     const scriptedSelection = scriptedAnswers
-      ? selectScriptedAnswer({ config, scriptedAnswers, scenarioTurn, latestPrompt, actorRole: options.actorRole, answeredScriptedQuestions })
+      ? selectScriptedAnswer({ config, scriptedAnswers, scenarioTurn, latestPrompt, promptContext, transcript, actorRole: options.actorRole, answeredScriptedQuestions })
       : null;
 
     const responseContext = {
@@ -1262,6 +1385,9 @@ async function runPartnerAiInterviewTurns(page, config, transcript, options = {}
 
     await responseInput.fill(response);
     await click(page, config.selectors.partnerAi.sendButton, 'Partner AI send');
+    // Anchor the next prompt read to this answer: the following turn must not read the
+    // page until Partner AI has posted something after it.
+    lastSubmittedResponse = response;
     await waitForInterviewReady(page, config, { stageName: interviewStageName });
 
     const visibleAfterResponse = await readVisibleBodyText(page);
@@ -1431,7 +1557,23 @@ function buildScenarioTurn(controller, actor, latestPrompt) {
 // Resolves the scripted answer (if any) for the current turn. Returns null when
 // the turn should be answered by the normal responder (follow-up, unmatched
 // prompt with no fallback left, or no scripted answer for this actor/question).
-function selectScriptedAnswer({ config, scriptedAnswers, scenarioTurn, latestPrompt, actorRole, answeredScriptedQuestions }) {
+function selectScriptedAnswer({ config, scriptedAnswers, scenarioTurn, latestPrompt, promptContext, transcript = [], actorRole, answeredScriptedQuestions }) {
+  // Scripted answers supply the FIRST response to each primary question only; follow-ups
+  // always fall through to the LLM responder (grounded in the transcript).
+  //
+  // This must be checked BEFORE matching, not just on the unmatched path. Partner AI's
+  // follow-ups reuse the vocabulary of the case, so a follow-up drilling into (say)
+  // efficiency gains can fuzzy-match a primary question that has not been used yet — and
+  // then the script for THAT question is injected verbatim. That is how a follow-up asking
+  // for examples linking a team-lead role to a 15% efficiency gain got answered with the
+  // raise request itself (12% base, bonus target, effective date): the q1 amount/timing
+  // script. Matching a primary question is not evidence that this turn IS that question.
+  const priorAnswerExists = transcript.some((entry) => entry.role === 'syntheticUser');
+  if (priorAnswerExists && Boolean(promptContext?.followUpQuestion)) {
+    console.log('[scripted] Follow-up prompt — answering with the LLM instead of a scripted answer.');
+    return null;
+  }
+
   const topic = config.run.scenarioFoundation?.topic;
   let primaryQuestionId = scenarioTurn?.primaryQuestionId ?? null;
   let matchConfidence = primaryQuestionId ? 'fuzzy' : null;
@@ -1451,6 +1593,14 @@ function selectScriptedAnswer({ config, scriptedAnswers, scenarioTurn, latestPro
   // Sequential fallback: if the live prompt can't be matched confidently, assign
   // the next unanswered scripted question in file order (manager prompts mirror
   // the employee questions, so the ordering is preserved across actors).
+  //
+  // NEVER on a follow-up turn. A fuzzy match is evidence the prompt really is that
+  // primary question; the fallback has no evidence at all, so on a follow-up it just
+  // injects the next script regardless of what was asked. That produced answers that
+  // did not address the question — e.g. a manager follow-up about team morale answered
+  // with the compensation-alternatives script — which then made Partner AI re-probe the
+  // same point for turn after turn. A follow-up must fall through to the LLM responder,
+  // which is grounded in the transcript.
   if (!primaryQuestionId) {
     const next = scriptedAnswers.answers.find((entry) => !answeredScriptedQuestions.has(entry.primaryQuestionId));
     if (next) {
@@ -1578,7 +1728,7 @@ async function waitForPostProcessing(page, config) {
 }
 
 async function labelFactStatements(page, config, labelText) {
-  await waitForFactLabelingReady(page, config);
+  await waitForFactLabelingReady(page, config, labelText);
   const labelingUrl = page.url();
   await selectAllFactStatementLabels(page, config, labelText);
   await submitFactStatementRatings(page);
@@ -1593,13 +1743,28 @@ async function completeActorPostProcessing(page, config, artifacts, actorLabel, 
       || factLabelingReady(text, currentPage.url())
   });
 
-  // NEW optional step between interview and Excerpt Review. Skip it cleanly, then
-  // re-wait for the real post-processing steps.
+  // "Add Helpful Details" / "Clarify & Improve" (route /clarify-context) sits between the
+  // interview and Excerpt Review, on BOTH actors' sides. It must be COMPLETED, not merely
+  // navigated away from: the case Status list keeps it "in progress" until it is submitted,
+  // and the Alignment Brief never unlocks. We complete it by skipping each prompt.
   if (clarifyContextReady(await readVisibleBodyText(page), page.url())) {
     recordStage(artifacts, `${actorLabel} Clarify Context`, 'started', firstState.url);
     const pathTaken = await skipClarifyContext(page, config);
-    console.log(`[clarify-context] ${actorLabel}: skipped optional step via ${pathTaken}.`);
-    recordStage(artifacts, `${actorLabel} Clarify Context`, 'skipped', `Optional step skipped without accepting suggestions (${pathTaken}).`);
+    const completed = !pathTaken.startsWith('excerpt-review-tab');
+    console.log(`[clarify-context] ${actorLabel}: ${completed ? 'completed' : 'COULD NOT COMPLETE'} step via ${pathTaken}.`);
+    if (completed) {
+      recordStage(artifacts, `${actorLabel} Clarify Context`, 'passed', `Step submitted without accepting suggestions (${pathTaken}).`);
+    } else {
+      // Record as a soft failure rather than throwing: later stages surface the real stall,
+      // but the artifact now names the step that was left incomplete.
+      recordStage(artifacts, `${actorLabel} Clarify Context`, 'failed', `Could not submit the step (${pathTaken}); the workflow will stall until it is completed.`);
+      artifacts?.softAssertions?.push({
+        type: 'clarify_context_incomplete',
+        passed: false,
+        expected: 'The "Add Helpful Details" step is submitted so the case can advance.',
+        observed: `${actorLabel}: fell back to the Excerpt Review tab; the step remains in progress.`
+      });
+    }
     await waitForWorkflowState(page, config, {
       name: `${actorLabel.toLowerCase()} excerpt review or fact statement labeling`,
       ready: (text, currentPage) => excerptReviewReady(text, currentPage.url()) || factLabelingReady(text, currentPage.url())
@@ -1645,9 +1810,13 @@ function clarifyContextReady(text, url = '') {
   // counter + bare "Submit"; Clarify Context uses a "reviewed" counter + "Submit & Continue".
   if (excerptReviewReady(value, url) || factLabelingReady(value, url)) return false;
   if (/\/clarify-context(?:[/?#]|$)/i.test(currentUrl)) return true;
-  return /\bClarify Context\b/i.test(value)
+  // Staging renamed this step: "Clarify Context" -> "Clarify & Improve" in the tab strip
+  // and "Add Helpful Details" in the case Status list, and replaced the "N/M reviewed"
+  // counter with numbered "Helpful Detail N" cards. Match old and new wording.
+  const stepHeading = /\bClarify Context\b|\bClarify\s*&\s*Improve\b|\bAdd Helpful Details?\b|\bHelpful Detail\s*\d+\b/i.test(value);
+  return stepHeading
     && /\bSubmit\s*&?\s*Continue\b/i.test(value)
-    && /(\d+)\s*\/\s*(\d+)\s+reviewed/i.test(value);
+    && (/(\d+)\s*\/\s*(\d+)\s+reviewed/i.test(value) || /\bHelpful Detail\s*\d+\b/i.test(value));
 }
 
 function extractExcerptApprovalCount(text) {
@@ -1656,23 +1825,37 @@ function extractExcerptApprovalCount(text) {
   return { approved: Number(match[1]), total: Number(match[2]) };
 }
 
-// The Clarify Context step is optional. We skip it WITHOUT accepting any suggested
-// context (accepting would alter the synthetic test data). Prefer "Submit & Continue";
-// if it is missing/disabled or does not advance, fall back to the Excerpt Review tab.
+// Complete the "Add Helpful Details" / "Clarify & Improve" step WITHOUT answering any of
+// its prompts (answering would invent content and alter the synthetic test data).
+//
+// The redesigned screen lists numbered "Helpful Detail N" cards, each with a textarea, a
+// Skip button, and a Save Detail button that stays disabled until text is typed.
+// "Submit & Continue" does not complete the step until every card has been skipped or
+// saved — so the old "click Submit & Continue, else jump to the Excerpt Review tab"
+// approach left the step permanently in progress ("Rabia adds helpful details" never
+// ticked), and the case could never reach the Alignment Brief. Skip every card first.
+//
 // Returns the path taken for logging.
 async function skipClarifyContext(page, config) {
+  const skipped = await skipAllHelpfulDetails(page);
+
   const submitContinue = page.getByRole('button', { name: /Submit\s*&?\s*Continue/i }).first();
   const visible = await submitContinue.isVisible({ timeout: 1000 }).catch(() => false);
   const enabled = visible && await submitContinue.isEnabled({ timeout: 500 }).catch(() => false)
     && (await submitContinue.getAttribute('aria-disabled').catch(() => null)) !== 'true';
   if (enabled) {
     await submitContinue.scrollIntoViewIfNeeded().catch(() => {});
-    await submitContinue.click();
+    await submitContinue.click().catch(() => {});
     await page.waitForLoadState('networkidle').catch(() => {});
-    await page.waitForTimeout(1500);
-    if (!clarifyContextReady(await readVisibleBodyText(page), page.url())) return 'submit-continue';
+    await page.waitForTimeout(2000);
+    if (!clarifyContextReady(await readVisibleBodyText(page), page.url())) {
+      return skipped ? `submit-continue after skipping ${skipped} helpful detail(s)` : 'submit-continue';
+    }
   }
+
   // Fallback: click the Excerpt Review tab directly (role=tab, else button/link/text).
+  // NOTE: this only moves the browser on; it does NOT complete the step, so the workflow
+  // will stall later. Kept as a last resort and reported distinctly so the log says so.
   const tab = page.getByRole('tab', { name: /Excerpt Review/i }).first();
   if (await tab.isVisible({ timeout: 1000 }).catch(() => false)) {
     await tab.click().catch(() => {});
@@ -1683,7 +1866,37 @@ async function skipClarifyContext(page, config) {
   }
   await page.waitForLoadState('networkidle').catch(() => {});
   await page.waitForTimeout(1500);
-  return 'excerpt-review-tab';
+  return 'excerpt-review-tab (step NOT completed)';
+}
+
+// Click Skip on every Helpful Detail card. Cards re-render as they resolve, so re-query
+// and always act on the first actionable Skip rather than caching an index. Returns how
+// many were skipped.
+async function skipAllHelpfulDetails(page) {
+  const deadline = Date.now() + 120000;
+  let skipped = 0;
+  while (Date.now() < deadline) {
+    await dismissTourOverlay(page, 'add helpful details');
+    const buttons = page.getByRole('button', { name: /^\s*Skip\s*$/i });
+    const count = await buttons.count().catch(() => 0);
+    let clicked = false;
+    for (let index = 0; index < count; index += 1) {
+      const button = buttons.nth(index);
+      if (!await button.isVisible().catch(() => false)) continue;
+      if (!await button.isEnabled().catch(() => false)) continue;
+      if ((await button.getAttribute('aria-disabled').catch(() => null)) === 'true') continue;
+      await button.scrollIntoViewIfNeeded().catch(() => {});
+      if (await button.click({ timeout: 3000 }).then(() => true).catch(() => false)) {
+        skipped += 1;
+        clicked = true;
+        await page.waitForTimeout(250);
+        break; // re-query: skipping a card re-renders the list and shifts indices
+      }
+    }
+    if (!clicked) break;
+  }
+  if (skipped) console.log(`[clarify-context] Skipped ${skipped} helpful detail prompt(s) without inventing content.`);
+  return skipped;
 }
 
 async function submitExcerptReview(page, config) {
@@ -1791,6 +2004,7 @@ async function waitForWorkflowState(page, config, { name, ready }) {
   let gateSince = 0;
 
   while (Date.now() < deadline) {
+    await dismissTourOverlay(page, name);
     lastText = await readVisibleBodyText(page);
     lastUrl = page.url();
     if (ready(lastText, page)) return {
@@ -1825,11 +2039,23 @@ async function waitForWorkflowState(page, config, { name, ready }) {
   ].join('\n'));
 }
 
+// The /fact-review route renders before the statements themselves exist: Common Ground
+// shows the "Rate your Confidence" chrome with a "Generating your statements… Hang
+// tight." placeholder while it builds them from the submitted excerpts. The chrome alone
+// satisfied the URL + keyword test below, so labeling started against a page with zero
+// rating controls. Treat the placeholder as explicitly not-ready.
+function factStatementsGenerating(text) {
+  const value = String(text ?? '');
+  return /generating your statements|statements? (?:are|is) (?:still )?being generated|this runs after you submit your excerpts/i.test(value)
+    || (/\bhang tight\b/i.test(value) && /\bstatements?\b/i.test(value));
+}
+
 function factLabelingReady(text, url = '') {
   const value = String(text ?? '');
   const currentUrl = String(url ?? '');
   if (/\/get-started(?:[/?#]|$)/i.test(currentUrl)) return false;
   if (excerptReviewReady(value, url)) return false;
+  if (factStatementsGenerating(value)) return false;
   const factPage = factReviewUrl(url)
     || (/\bRate your Confidence\b/i.test(value) && /\bStatement\s+\d+\b/i.test(value))
     || (!currentUrl && /\bFact Statements?\b/i.test(value));
@@ -2220,18 +2446,41 @@ function compactVisibleText(text, maxLength = 1200) {
   return `${compact.slice(0, half)} ... ${compact.slice(-half)}`;
 }
 
-async function waitForFactLabelingReady(page, config) {
+// True once the page actually exposes something to act on: label controls to click, a
+// progress counter, or an already-enabled submit (everything rated). Text readiness is
+// not enough — the /fact-review chrome renders while statements are still generating.
+async function factRatingSurfaceReady(page, labelText) {
+  const progress = extractFactRatingProgress(await readVisibleBodyText(page));
+  if (progress) return true;
+  const controls = await exactLabelControls(page, labelText);
+  if (await controls.count().catch(() => 0) > 0) return true;
+  return Boolean(await findEnabledFactSubmitControl(page));
+}
+
+async function waitForFactLabelingReady(page, config, labelText) {
   let deadline = Date.now() + config.run.postCompletionWaitMs;
+  let sawGenerating = false;
   while (Date.now() < deadline) {
+    await dismissTourOverlay(page, 'fact statement labeling');
     const text = await readVisibleBodyText(page);
-    if (factLabelingReady(text, page.url())) return;
+    if (factStatementsGenerating(text)) sawGenerating = true;
+    // Require both the labeling screen AND a usable rating surface, so we never start
+    // clicking against a page whose statements have not been generated yet.
+    if (factLabelingReady(text, page.url()) && await factRatingSurfaceReady(page, labelText)) return;
     // Still processing → roll the deadline forward so a live processing screen
     // never trips the fixed timeout (a true hang still ends at the original deadline).
     if (isProcessingState(text)) deadline = Math.max(deadline, Date.now() + 180000);
     await page.waitForTimeout(1500);
   }
 
-  throw new Error('Fact statement labeling did not become available before timeout.');
+  throw new Error([
+    'Fact statement labeling did not become available before timeout.',
+    sawGenerating
+      ? 'The "Generating your statements…" placeholder was showing during the wait; statement generation never produced rating controls.'
+      : 'No statement-generation placeholder was seen; the labeling screen never exposed rating controls.',
+    `Current URL: ${page.url()}`,
+    `Last visible page text: ${compactVisibleText(await readVisibleBodyText(page), 1800)}`
+  ].join('\n'));
 }
 
 async function selectAllFactStatementLabels(page, config, labelText) {
@@ -2453,10 +2702,52 @@ async function verifyFactStatementSubmission(page, labelingUrl) {
   ].join('\n'));
 }
 
-async function readLatestPrompt(page, config) {
+// True when Partner AI has posted something after the answer we just submitted.
+//
+// Comparing whole-transcript text does NOT work here: our own submitted answers are
+// appended to the same transcript, so the raw text grows every turn whether or not
+// Partner AI replied. The reliable signal is what sits AFTER our last answer — nothing
+// but chat timestamps means Partner AI has not responded yet.
+function partnerRepliedAfter(rawText, submittedResponse) {
+  const text = collapseWhitespace(rawText);
+  const answer = collapseWhitespace(submittedResponse);
+  if (!answer) return true;
+  const index = text.lastIndexOf(answer);
+  if (index < 0) return true; // can't locate our answer — don't block the interview
+  const tail = text.slice(index + answer.length)
+    .replace(/\b\d{1,2}:\d{2}\s*(?:AM|PM)?\b/gi, ' ');
+  return collapseWhitespace(tail).length > 0;
+}
+
+function collapseWhitespace(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+// Stability is not newness. waitForStableLocatorText settles as soon as the DOM stops
+// changing — which is immediately true when Partner AI has not replied yet and the tail
+// of the transcript is still the synthetic user's own answer. Reading there yields a
+// prompt whose question extraction falls back to the header/sidebar block (the FIRST
+// primary question), so the interview appears to jump back to question 1. Passing
+// afterResponse makes the read wait for Partner AI to actually reply.
+async function readLatestPrompt(page, config, options = {}) {
   const locator = page.locator(config.selectors.partnerAi.latestPrompt).first();
   await locator.waitFor({ state: 'visible', timeout: 30000 });
-  return waitForStableLocatorText(locator, page);
+  const afterResponse = options.afterResponse ?? '';
+  if (!afterResponse) return waitForStableLocatorText(locator, page);
+
+  const deadline = Date.now() + (options.newPromptTimeoutMs ?? 60000);
+  let latest = '';
+  while (Date.now() < deadline) {
+    latest = await waitForStableLocatorText(locator, page);
+    if (!latest) break;
+    if (partnerRepliedAfter(latest, afterResponse)) return latest;
+    // The interview can legitimately end without another question.
+    if (isCompletionPrompt(latest, config.completionPhrases) || isPostInterviewState(latest)) return latest;
+    await page.waitForTimeout(2000);
+  }
+  // Deliberately return the unchanged text rather than throwing: the caller's stall
+  // counter decides whether this is a transient lag or a genuine dead transcript.
+  return latest;
 }
 
 // Common Ground shows a first-run onboarding tour modal ("Start Groundwork with
@@ -2465,45 +2756,76 @@ async function readLatestPrompt(page, config) {
 // never returns for the account (falling back to the X icon, then Escape). If the
 // modal is not present this returns instantly (timeout:0 checks) with no waits or
 // clicks, so the happy path is never slowed.
-async function dismissOnboardingTourModal(page) {
-  const tourSignal = /Step \d+ of \d+|Start Groundwork with confidence|Take a tour|Start Tour/i;
+// Product-tour / onboarding overlay dismissal.
+//
+// The tour can appear on EITHER actor's side, on ANY page, at ANY step of the workflow,
+// and at any step number ("Step 1 of 13", "Step 7 of 13", ...), and it blocks whatever is
+// underneath — most damagingly the interview response composer. It can also reappear later
+// in the same run, so this is checked repeatedly rather than once.
+//
+// Matching is deliberately structural (control labels + step counter) rather than keyed to
+// a heading, because the heading and step count differ per screen. Dismissal prefers
+// "Exit tour" (the current control); older builds exposed "Don't show again".
+const TOUR_CONTROL_PATTERN = /Exit tour|Start Tour|Take a tour|Don'?t show again/i;
+const TOUR_SIGNAL_PATTERN = /Exit tour|Start Tour|Take a tour|Step \d+ of \d+|Groundwork with confidence/i;
 
-  // Cheap presence check: timeout 0 resolves synchronously, so a missing modal
-  // returns immediately without waiting or clicking anything.
-  const dialogModal = page.getByRole('dialog').filter({ hasText: tourSignal }).first();
-  let present = await dialogModal.isVisible({ timeout: 0 }).catch(() => false);
+async function dismissTourOverlay(page, where = '') {
+  // Cheap presence check first: timeout 0 resolves synchronously, so a page with no tour
+  // costs one near-free query and never waits or clicks.
+  const exitTour = page.getByRole('button', { name: /Exit tour/i })
+    .or(page.getByRole('link', { name: /Exit tour/i }))
+    .first();
+  let present = await exitTour.isVisible({ timeout: 0 }).catch(() => false);
 
+  const dialogModal = page.getByRole('dialog').filter({ hasText: TOUR_SIGNAL_PATTERN }).first();
+  if (!present) present = await dialogModal.isVisible({ timeout: 0 }).catch(() => false);
   if (!present) {
-    // Fallback for builds that don't tag the tour with a dialog role: match the
-    // distinctive heading text directly.
-    const textModal = page.getByText(/Start Groundwork with confidence/i).first();
-    present = await textModal.isVisible({ timeout: 0 }).catch(() => false);
+    // Some builds render the tour without a dialog role; fall back to the step counter,
+    // which is the one element every tour step has regardless of wording.
+    const stepCounter = page.getByText(/Step \d+ of \d+/i).first();
+    present = await stepCounter.isVisible({ timeout: 0 }).catch(() => false);
   }
   if (!present) return false;
 
-  // Preferred: "Don't show again" (link or button) so the tour never reappears.
-  const dontShow = page.getByRole('link', { name: /Don'?t show again/i })
-    .or(page.getByRole('button', { name: /Don'?t show again/i }))
-    .first();
-  if (await dontShow.isVisible({ timeout: 0 }).catch(() => false)) {
-    await dontShow.click().catch(() => {});
-    await page.waitForTimeout(300);
-    return true;
+  const location = where ? `${where} — ${page.url()}` : page.url();
+  const attempts = [
+    ['Exit tour', exitTour],
+    ["Don't show again", page.getByRole('link', { name: /Don'?t show again/i })
+      .or(page.getByRole('button', { name: /Don'?t show again/i })).first()],
+    ['close icon', dialogModal.getByRole('button', { name: /close|dismiss|^x$/i }).first()
+      .or(page.getByRole('button', { name: /close|dismiss|^x$/i }).first())]
+  ];
+
+  for (const [label, control] of attempts) {
+    if (!await control.isVisible({ timeout: 0 }).catch(() => false)) continue;
+    await control.click({ timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(400);
+    if (!await tourStillVisible(page)) {
+      console.log(`[tour] Dismissed product tour overlay via "${label}" on ${location}.`);
+      return true;
+    }
   }
 
-  // Fallback 1: the X close icon in the modal's top-right corner.
-  const closeIcon = dialogModal.getByRole('button', { name: /close|dismiss|^x$/i }).first()
-    .or(page.getByRole('button', { name: /close|dismiss|^x$/i }).first());
-  if (await closeIcon.isVisible({ timeout: 0 }).catch(() => false)) {
-    await closeIcon.click().catch(() => {});
-    await page.waitForTimeout(300);
-    return true;
-  }
-
-  // Fallback 2: Escape.
   await page.keyboard.press('Escape').catch(() => {});
-  await page.waitForTimeout(300);
-  return true;
+  await page.waitForTimeout(400);
+  const gone = !await tourStillVisible(page);
+  console.log(`[tour] ${gone ? 'Dismissed' : 'FAILED to dismiss'} product tour overlay via Escape on ${location}.`);
+  return gone;
+}
+
+async function tourStillVisible(page) {
+  for (const locator of [
+    page.getByRole('button', { name: TOUR_CONTROL_PATTERN }).first(),
+    page.getByText(/Step \d+ of \d+/i).first()
+  ]) {
+    if (await locator.isVisible({ timeout: 0 }).catch(() => false)) return true;
+  }
+  return false;
+}
+
+// Back-compat alias for the previous name.
+async function dismissOnboardingTourModal(page) {
+  return dismissTourOverlay(page, 'interview');
 }
 
 async function waitForInterviewReady(page, config, options = {}) {
@@ -2571,6 +2893,7 @@ function interviewReadySignal({ readyInput }) {
 async function findReadyResponseInput(page, selector, timeout = 1000) {
   const inputs = page.locator(selector);
   const deadline = Date.now() + timeout;
+  await dismissTourOverlay(page, 'response input');
 
   while (Date.now() < deadline) {
     const count = await inputs.count().catch(() => 0);
@@ -2613,7 +2936,15 @@ function isPostInterviewState(text) {
 }
 
 function isProcessingState(text) {
-  return /checking engagement|engagement levels?|still processing|processing your|analy[sz]ing|please wait|one moment|understanding your intent|understanding your response|saving your response|saving your answer|\d+\s*%\s*complete|thinking…|thinking\.\.\.|\bloading\b/i.test(String(text ?? ''));
+  const value = String(text ?? '');
+  // Statement generation is an active processing screen, so it must roll the wait
+  // deadline forward like any other — otherwise a slow generation trips the fixed
+  // post-processing timeout while the app is visibly still working.
+  if (factStatementsGenerating(value)) return true;
+  // Partner AI's between-turn states. While any of these show, the composer is removed or
+  // disabled, so every wait loop must keep waiting rather than treat it as a dead page.
+  if (/making sure there'?s enough|enough here to go on|reviewing your (?:response|answer)|checking your (?:response|answer)/i.test(value)) return true;
+  return /checking engagement|engagement levels?|still processing|processing your|analy[sz]ing|please wait|one moment|understanding your intent|understanding your response|saving your response|saving your answer|\d+\s*%\s*complete|thinking…|thinking\.\.\.|\bloading\b/i.test(value);
 }
 
 function otherPartyGate(text) {
@@ -2940,8 +3271,93 @@ async function fillCaseParties(page, selectors, config, syntheticCase, store) {
     return;
   }
 
-  await fillFirstEmpty(page, 'input[type="text"]', syntheticCase.participantName, 'empty party name');
-  await fillFirstEmpty(page, 'input[type="email"]', syntheticCase.participantEmail, 'empty party email');
+  // Current staging design: the form resolves BOTH parties itself and renders them as
+  // read-only text ("That's you — taken from your account", "Your manager, from your
+  // organization's records"). There is nothing to fill, but we must still confirm the
+  // pairing matches the two accounts this run drives, or the participant login later
+  // lands on a case it was never invited to.
+  const autoParties = await readAutoResolvedParties(page);
+  if (autoParties) {
+    await verifyAutoResolvedParties(page, autoParties, config, store);
+    return;
+  }
+
+  // Legacy form: both parties are free text and the app auto-fills the logged-in one.
+  if (await hasEmptyEditableInput(page, 'input[type="text"]')) {
+    await fillFirstEmpty(page, 'input[type="text"]', syntheticCase.participantName, 'empty party name');
+    await fillFirstEmpty(page, 'input[type="email"]', syntheticCase.participantEmail, 'empty party email');
+    return;
+  }
+
+  // None of the known shapes matched. Previously we fell through to the legacy branch
+  // regardless, which failed with "Could not find an empty, editable field ..." — an
+  // error about the wrong thing. Fail explicitly, with the form state attached.
+  await failCaseForm(page, store, [
+    'The New Discussion Request form matched none of the known shapes.',
+    `Expected one of: the "${selectors.managerSelect}" manager dropdown, read-only auto-resolved`,
+    'Party 1/Party 2 blocks, or legacy free-text party fields — none were present.',
+    'The form has probably changed again; re-run `node scripts/launch.js scripts/inspectCaseForm.js` to see its current fields.'
+  ].join(' '));
+}
+
+// Parse the read-only party blocks the redesigned form renders. Returns null when the
+// page does not use that shape, so the caller can try the other known layouts.
+async function readAutoResolvedParties(page) {
+  const text = (await readVisibleBodyText(page)).replace(/\s+/g, ' ');
+  const parties = {};
+  for (const number of [1, 2]) {
+    const match = text.match(new RegExp(
+      `Party\\s*${number}:\\s*Name:\\s*(.+?)\\s*Role:\\s*(.+?)\\s*Email:\\s*([\\w.+-]+@[\\w-]+\\.[\\w.-]+)`, 'i'));
+    if (!match) return null;
+    parties[`party${number}`] = { name: match[1].trim(), role: match[2].trim(), email: match[3].trim() };
+  }
+  return parties;
+}
+
+// The app decides the pairing, so our only job is to confirm it is the pairing this run
+// can actually drive: both configured accounts must appear. Party order varies by topic
+// (Raise puts the employee first, Performance Review the manager), so match on email.
+async function verifyAutoResolvedParties(page, parties, config, store) {
+  const requestorEmail = String(config.credentials.requestor.email ?? '').trim().toLowerCase();
+  const participantEmail = String(config.credentials.participant.email ?? '').trim().toLowerCase();
+  const present = [parties.party1, parties.party2].map((party) => party.email.toLowerCase());
+  const describe = [parties.party1, parties.party2]
+    .map((party, index) => `Party ${index + 1}: ${party.name} (${party.role}) <${party.email}>`).join('; ');
+
+  const missing = [
+    present.includes(requestorEmail) ? null : `requestor ${config.credentials.requestor.email}`,
+    present.includes(participantEmail) ? null : `participant ${config.credentials.participant.email}`
+  ].filter(Boolean);
+
+  if (missing.length) {
+    await failCaseForm(page, store,
+      `The form auto-resolved parties that do not match this run's accounts — missing ${missing.join(' and ')}. `
+      + `Form shows: ${describe}. Refusing to submit a case the configured participant cannot accept.`);
+  }
+
+  console.log(`[case] Parties auto-resolved by the form — ${describe}.`);
+}
+
+async function hasEmptyEditableInput(page, selector) {
+  const inputs = page.locator(selector);
+  const count = await inputs.count().catch(() => 0);
+  for (let index = 0; index < count; index += 1) {
+    const input = inputs.nth(index);
+    if (!await input.isVisible().catch(() => false)) continue;
+    if (!await input.isEditable().catch(() => false)) continue;
+    if (await input.inputValue().catch(() => '')) continue;
+    return true;
+  }
+  return false;
+}
+
+// Screenshot and throw, so an unrecognised case form stops the run with an accurate
+// message instead of a misleading downstream selector error.
+async function failCaseForm(page, store, message) {
+  const shot = `${store.runDir}/case-form-unrecognised.png`;
+  await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
+  const visible = (await readVisibleBodyText(page)).replace(/\s+/g, ' ').trim().slice(0, 1200);
+  throw new Error([message, `URL: ${page.url()}`, `Screenshot: ${shot}`, `Visible form text: ${visible}`].join('\n'));
 }
 
 // Fill a field only if it is currently empty, so an environment that still auto-fills the
@@ -3019,6 +3435,8 @@ async function failManagerSelection(page, store, message) {
 }
 
 async function click(page, selector, label) {
+  // The product tour can overlay any page and intercept the click.
+  await dismissTourOverlay(page, `before clicking ${label}`);
   const locator = await waitForVisible(page, selector, label);
   await locator.click();
 }
