@@ -1,3 +1,4 @@
+import { writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { buildSyntheticCase } from './syntheticData.js';
 import { generatePartnerAiResponse, generateScenarioDossiers, verifyOpenAiConnectivity } from './llmResponder.js';
@@ -1749,7 +1750,7 @@ async function completeActorPostProcessing(page, config, artifacts, actorLabel, 
   // and the Alignment Brief never unlocks. We complete it by skipping each prompt.
   if (clarifyContextReady(await readVisibleBodyText(page), page.url())) {
     recordStage(artifacts, `${actorLabel} Clarify Context`, 'started', firstState.url);
-    const pathTaken = await skipClarifyContext(page, config);
+    const pathTaken = await skipClarifyContext(page, config, actorLabel);
     const completed = !pathTaken.startsWith('excerpt-review-tab');
     console.log(`[clarify-context] ${actorLabel}: ${completed ? 'completed' : 'COULD NOT COMPLETE'} step via ${pathTaken}.`);
     if (completed) {
@@ -1836,8 +1837,17 @@ function extractExcerptApprovalCount(text) {
 // ticked), and the case could never reach the Alignment Brief. Skip every card first.
 //
 // Returns the path taken for logging.
-async function skipClarifyContext(page, config) {
+async function skipClarifyContext(page, config, actorLabel = 'actor') {
   const skipped = await skipAllHelpfulDetails(page);
+  // Context Item cards are a SECOND card type on this step and are not covered by the Skip
+  // sweep above; resolve them before testing Submit & Continue.
+  const contextItems = await resolveContextItems(page);
+  // Resolving a Context Item re-renders the list and can reveal Helpful Detail cards that
+  // were not actionable on the first sweep.
+  const skippedAgain = contextItems.accepted + contextItems.dismissed > 0
+    ? await skipAllHelpfulDetails(page)
+    : 0;
+  const work = describeClarifyWork(skipped + skippedAgain, contextItems);
 
   const submitContinue = page.getByRole('button', { name: /Submit\s*&?\s*Continue/i }).first();
   const visible = await submitContinue.isVisible({ timeout: 1000 }).catch(() => false);
@@ -1849,9 +1859,14 @@ async function skipClarifyContext(page, config) {
     await page.waitForLoadState('networkidle').catch(() => {});
     await page.waitForTimeout(2000);
     if (!clarifyContextReady(await readVisibleBodyText(page), page.url())) {
-      return skipped ? `submit-continue after skipping ${skipped} helpful detail(s)` : 'submit-continue';
+      return work ? `submit-continue after ${work}` : 'submit-continue';
     }
   }
+
+  // The step did not complete. Capture the page BEFORE navigating away: the counter, the
+  // cards still outstanding and every control they expose are the only evidence of why
+  // Submit & Continue stayed inert, and none of it survives the tab click below.
+  const diagnostics = await captureClarifyContextDiagnostics(page, actorLabel, contextItems);
 
   // Fallback: click the Excerpt Review tab directly (role=tab, else button/link/text).
   // NOTE: this only moves the browser on; it does NOT complete the step, so the workflow
@@ -1866,7 +1881,17 @@ async function skipClarifyContext(page, config) {
   }
   await page.waitForLoadState('networkidle').catch(() => {});
   await page.waitForTimeout(1500);
-  return 'excerpt-review-tab (step NOT completed)';
+  const suffix = [work, diagnostics].filter(Boolean).join('; ');
+  return `excerpt-review-tab (step NOT completed${suffix ? `: ${suffix}` : ''})`;
+}
+
+function describeClarifyWork(skipped, contextItems) {
+  const parts = [];
+  if (skipped) parts.push(`skipping ${skipped} helpful detail(s)`);
+  if (contextItems.accepted) parts.push(`accepting ${contextItems.accepted} verbatim context item(s)`);
+  if (contextItems.dismissed) parts.push(`dismissing ${contextItems.dismissed} context item(s)`);
+  if (contextItems.unresolved.length) parts.push(`${contextItems.unresolved.length} context item(s) left unresolved`);
+  return parts.join(', ');
 }
 
 // Click Skip on every Helpful Detail card. Cards re-render as they resolve, so re-query
@@ -1897,6 +1922,217 @@ async function skipAllHelpfulDetails(page) {
   }
   if (skipped) console.log(`[clarify-context] Skipped ${skipped} helpful detail prompt(s) without inventing content.`);
   return skipped;
+}
+
+// Controls that resolve a Context Item card without writing anything into the case.
+const CONTEXT_ITEM_DISMISS = /^\s*(Skip|Dismiss|Reject|Ignore|Decline|No,? thanks|Not accurate|Leave as is)\s*$/i;
+
+// Resolve the OTHER card type on "Clarify & Improve". Context Items are not Helpful Details:
+// they flag an unclear reference and offer a pre-filled answer under a "POSSIBLE CONTEXT
+// FOUND - ACCEPT ONLY IF ACCURATE" banner, with an Accept button and no plain "Skip". Because
+// skipAllHelpfulDetails only clicks controls named exactly "Skip", these cards were never
+// touched: the counter sat one short ("14/15 reviewed"), Submit & Continue never activated,
+// and the run burned the full post-completion wait on an Excerpt Review that could not arrive
+// (run 2026-08-12T10-58-27-194Z, CG-0054).
+//
+// Accepting a suggestion writes it into the case, so accept ONLY when the suggestion is
+// identical to the excerpt already quoted on the card (after normalising quotes, dashes and
+// whitespace). That resolves the card while adding no content, which keeps the "invent
+// nothing" rule this step is built around. A suggestion that differs is real content we did
+// not author, so it is dismissed instead; a card with neither control is left alone and
+// reported rather than forced.
+async function resolveContextItems(page) {
+  const result = { accepted: 0, dismissed: 0, unresolved: [] };
+  const attempted = [];
+  const deadline = Date.now() + 120000;
+
+  while (Date.now() < deadline) {
+    await dismissTourOverlay(page, 'clarify context items');
+    const card = await tagNextUnresolvedContextItem(page, attempted);
+    if (!card) break;
+
+    // Keyed on the excerpt, not on a DOM handle: the list re-renders after every click, so a
+    // card we could not resolve must be remembered by content or the loop re-picks it forever.
+    attempted.push(card.excerpt);
+
+    const scope = page.locator('[data-cg-context-item="1"]').first();
+    const wanted = card.identical ? /^\s*Accept\s*$/i : CONTEXT_ITEM_DISMISS;
+    const control = scope.getByRole('button', { name: wanted }).first();
+
+    if (await clickWhenActionable(control)) {
+      if (card.identical) result.accepted += 1;
+      else result.dismissed += 1;
+      await page.waitForTimeout(400);
+      continue;
+    }
+
+    result.unresolved.push({
+      excerpt: card.excerpt.slice(0, 160),
+      suggestionMatchedExcerpt: card.identical,
+      reason: card.identical
+        ? 'suggestion matched the excerpt but no actionable Accept control was found'
+        : 'suggestion differed from the excerpt and the card offered no dismiss control',
+      controls: card.actions
+    });
+  }
+
+  if (result.accepted || result.dismissed) {
+    console.log(`[clarify-context] Resolved ${result.accepted} context item(s) by accepting a verbatim suggestion and ${result.dismissed} by dismissing.`);
+  }
+  for (const item of result.unresolved) {
+    console.log(`[clarify-context] Context item left unresolved - ${item.reason}. Controls: ${item.controls.map((action) => action.label).join(', ') || 'none'}`);
+  }
+  return result;
+}
+
+// Tags the next unresolved Context Item with data-cg-context-item="1" and returns what it
+// says. Tagging (rather than returning a handle) keeps the locator valid across the re-render
+// that each click triggers; the attribute is cleared on every pass.
+async function tagNextUnresolvedContextItem(page, attempted) {
+  return page.evaluate((attemptedExcerpts) => {
+    const ATTR = 'data-cg-context-item';
+    document.querySelectorAll(`[${ATTR}]`).forEach((node) => node.removeAttribute(ATTR));
+
+    const norm = (value) => String(value ?? '')
+      .replace(/[‘’]/g, "'")
+      .replace(/[“”]/g, '"')
+      .replace(/[–—]/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const ACTIONS = 'button, [role="button"], input[type="submit"], a';
+    const labelOf = (node) => norm(node.innerText || node.value || node.getAttribute('aria-label') || '');
+
+    // Innermost element naming the card: the card root also starts with "Context Item N", so
+    // exclude any element that has a child saying the same thing.
+    const headings = Array.from(document.querySelectorAll('*')).filter((node) => {
+      if (!/^Context Item\b/i.test(norm(node.textContent))) return false;
+      return !Array.from(node.children).some((child) => /^Context Item\b/i.test(norm(child.textContent)));
+    });
+
+    for (const heading of headings) {
+      let card = null;
+      let node = heading;
+      for (let depth = 0; depth < 8 && node; depth += 1) {
+        const hasBanner = /POSSIBLE CONTEXT FOUND/i.test(node.innerText || '');
+        const hasAction = Array.from(node.querySelectorAll(ACTIONS)).some((action) => labelOf(action));
+        if (hasBanner && hasAction) { card = node; break; }
+        node = node.parentElement;
+      }
+      if (!card) continue;
+      // "Change answer" is the marker the app leaves on a card that has been resolved.
+      if (/Change answer/i.test(norm(card.innerText))) continue;
+
+      const actions = Array.from(card.querySelectorAll(ACTIONS))
+        .map((action) => ({
+          label: labelOf(action),
+          disabled: Boolean(action.disabled) || action.getAttribute('aria-disabled') === 'true'
+        }))
+        .filter((action) => action.label);
+      const actionLabels = new Set(actions.map((action) => action.label));
+
+      const lines = String(card.innerText || '').split('\n').map((line) => line.trim()).filter(Boolean);
+      const bannerIndex = lines.findIndex((line) => /POSSIBLE CONTEXT FOUND/i.test(line));
+      const quoted = lines.slice(0, bannerIndex < 0 ? undefined : bannerIndex).join(' ')
+        .match(/[“"]([\s\S]+?)[”"]/);
+      const excerpt = norm(quoted ? quoted[1] : '');
+
+      // The suggestion may share a line with the banner or follow it; strip the banner text
+      // and drop any line that is just a button label.
+      const bannerTail = bannerIndex >= 0
+        ? lines[bannerIndex].replace(/^.*ACCEPT ONLY IF ACCURATE/i, '').replace(/^.*POSSIBLE CONTEXT FOUND/i, '')
+        : '';
+      const suggestion = norm([bannerTail, ...(bannerIndex >= 0 ? lines.slice(bannerIndex + 1) : [])]
+        .filter((line) => norm(line) && !actionLabels.has(norm(line)))
+        .join(' '));
+
+      if (attemptedExcerpts.includes(excerpt)) continue;
+
+      card.setAttribute(ATTR, '1');
+      return {
+        excerpt,
+        suggestion,
+        // Empty excerpt or suggestion must never count as a match - that would accept blind.
+        identical: Boolean(excerpt) && Boolean(suggestion) && excerpt === suggestion,
+        actions
+      };
+    }
+    return null;
+  }, attempted);
+}
+
+async function clickWhenActionable(locator) {
+  if (!await locator.isVisible({ timeout: 1000 }).catch(() => false)) return false;
+  if (!await locator.isEnabled({ timeout: 500 }).catch(() => false)) return false;
+  if ((await locator.getAttribute('aria-disabled').catch(() => null)) === 'true') return false;
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  return locator.click({ timeout: 3000 }).then(() => true).catch(() => false);
+}
+
+// Dump everything needed to diagnose a clarify step that would not submit: a full-page
+// screenshot, the raw DOM, and a JSON control inventory (every button with its enabled state,
+// the review counter, and each card's own controls). Written into the run's results dir so the
+// next failure can be read without re-running against staging.
+async function captureClarifyContextDiagnostics(page, actorLabel, contextItems) {
+  const slug = String(actorLabel ?? 'actor').toLowerCase().replace(/\s+/g, '-');
+  const base = `${activeRunDir ?? '.'}/clarify-context-not-completed-${slug}`;
+  const written = [];
+
+  if (await page.screenshot({ path: `${base}.png`, fullPage: true }).then(() => true).catch(() => false)) {
+    written.push(`${slug}.png`);
+  }
+
+  const html = await page.content().catch(() => null);
+  if (html !== null && await writeFile(`${base}.html`, html, 'utf8').then(() => true).catch(() => false)) {
+    written.push(`${slug}.html`);
+  }
+
+  const inventory = await page.evaluate(() => {
+    const norm = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
+    const ACTIONS = 'button, [role="button"], input[type="submit"], a';
+    const describe = (node) => {
+      const rect = node.getBoundingClientRect();
+      return {
+        tag: node.tagName.toLowerCase(),
+        label: norm(node.innerText || node.value || node.getAttribute('aria-label') || ''),
+        disabled: Boolean(node.disabled),
+        ariaDisabled: node.getAttribute('aria-disabled'),
+        visible: rect.width > 0 && rect.height > 0
+      };
+    };
+    const body = norm(document.body?.innerText);
+    return {
+      url: window.location.href,
+      counter: body.match(/(\d+)\s*\/\s*(\d+)\s+reviewed/i)?.[0] ?? null,
+      controls: Array.from(document.querySelectorAll(ACTIONS)).map(describe).filter((control) => control.label),
+      cards: Array.from(document.querySelectorAll('*'))
+        .filter((node) => {
+          const text = norm(node.textContent);
+          if (!/^(Context Item|Helpful Detail)\b/i.test(text)) return false;
+          return !Array.from(node.children).some((child) => /^(Context Item|Helpful Detail)\b/i.test(norm(child.textContent)));
+        })
+        .map((node) => {
+          let card = node;
+          for (let depth = 0; depth < 8 && card?.parentElement; depth += 1) {
+            if (Array.from(card.querySelectorAll(ACTIONS)).some((action) => norm(action.innerText))) break;
+            card = card.parentElement;
+          }
+          return {
+            heading: norm(node.textContent).slice(0, 80),
+            resolved: /Change answer/i.test(norm(card.innerText)),
+            text: norm(card.innerText).slice(0, 600),
+            controls: Array.from(card.querySelectorAll(ACTIONS)).map(describe).filter((control) => control.label)
+          };
+        })
+    };
+  }).catch(() => null);
+
+  const report = { actor: actorLabel, capturedAt: new Date().toISOString(), contextItems, page: inventory };
+  if (await writeFile(`${base}.json`, JSON.stringify(report, null, 2), 'utf8').then(() => true).catch(() => false)) {
+    written.push(`${slug}.json`);
+  }
+
+  if (written.length) console.log(`[clarify-context] Wrote diagnostics: clarify-context-not-completed-{${written.map((name) => name.split('.').pop()).join(',')}}.`);
+  return written.length ? `diagnostics: clarify-context-not-completed-${slug}.{${written.map((name) => name.split('.').pop()).join(',')}}` : '';
 }
 
 async function submitExcerptReview(page, config) {
@@ -3605,8 +3841,23 @@ async function selectRequestTab(page, tabPattern) {
   }
 }
 
+// Begin the request for exactly ONE card. The climb below stops at the card's OWN button and
+// never borrows a neighbour's.
+//
+// The previous version searched each ancestor for the first *enabled* Begin Request, so a
+// disabled button on the matched card was skipped and the climb continued to the container
+// holding every variant, where it clicked whichever card came first in the DOM. On staging the
+// "Performance Review - Evaluation" button is disabled for accounts without the role
+// (title="Your role can't start this type of discussion. Contact your administrator."), so
+// three runs silently created *Coaching* cases carrying Evaluation-labelled synthetic titles
+// and Evaluation quality criteria - the interview served Coaching questions and no scripted
+// answer could match.
+//
+// Now the climb stops at the first ancestor containing ANY Begin Request button: that is the
+// card's own scope. A disabled button there is a hard error naming the UI's own explanation,
+// not a reason to look elsewhere.
 async function clickRequestCardButton(page, cardTitle, buttonPattern = /Begin Request/i) {
-  const clicked = await page.evaluate(({ target, btnSource, btnFlags }) => {
+  const outcome = await page.evaluate(({ target, btnSource, btnFlags }) => {
     const beginPattern = new RegExp(btnSource, btnFlags);
     const isDisabled = (element) => element.disabled || element.getAttribute('aria-disabled') === 'true';
     // Normalize dash variants (en/em dash, minus) and whitespace so the config
@@ -3616,7 +3867,33 @@ async function clickRequestCardButton(page, cardTitle, buttonPattern = /Begin Re
       .replace(/[\u2010-\u2015\u2212]/g, '-')
       .replace(/\s+/g, ' ')
       .trim();
+    const raw = (value) => String(value || '').replace(/\s+/g, ' ').trim();
     const wanted = norm(target);
+    const ACTIONS = 'button,a,[role="button"]';
+    const beginButtonsIn = (node) => [...node.querySelectorAll(ACTIONS)]
+      .filter((element) => beginPattern.test((element.innerText || '').trim()));
+
+    // Whatever the UI offers as the reason a control is unavailable.
+    const reasonFor = (element) => {
+      const described = element.getAttribute('aria-describedby');
+      const describedText = described ? raw(document.getElementById(described)?.innerText) : '';
+      return raw(element.getAttribute('title') || element.getAttribute('aria-label') || describedText);
+    };
+
+    // The card title owning a button: the nearest ancestor whose subtree holds exactly one
+    // heading. At card level that is the card's own title; at container level several headings
+    // appear, so the container is skipped.
+    const ownerTitleOf = (element) => {
+      let node = element.parentElement;
+      for (let depth = 0; node && depth < 6; depth += 1) {
+        const headings = [...node.querySelectorAll('h1,h2,h3,h4,strong')]
+          .map((heading) => raw(heading.innerText))
+          .filter(Boolean);
+        if (headings.length === 1) return headings[0];
+        node = node.parentElement;
+      }
+      return '';
+    };
 
     // Match the card whose title is the requested variant exactly, else the most
     // specific containment (least extra text). No "shortest overall" heuristic,
@@ -3627,29 +3904,71 @@ async function clickRequestCardButton(page, cardTitle, buttonPattern = /Begin Re
       .map((candidate) => ({ ...candidate, score: candidate.text === wanted ? -1 : candidate.text.length - wanted.length }))
       .sort((a, b) => a.score - b.score);
 
+    if (!candidates.length) return { status: 'no-card' };
+
     for (const candidate of candidates) {
       let node = candidate.element;
       for (let depth = 0; node && depth < 6; depth += 1) {
-        const button = [...node.querySelectorAll('button,a,[role="button"]')]
-          .find((element) => beginPattern.test((element.innerText || '').trim()) && !isDisabled(element));
-        if (button) {
-          button.click();
-          return true;
+        // Stop at the first ancestor holding any Begin Request button, enabled or not.
+        const buttons = beginButtonsIn(node);
+        if (!buttons.length) { node = node.parentElement; continue; }
+
+        // One button here means we are inside a single card. Several means the climb reached a
+        // container spanning sibling cards, so attribute by owning title rather than guess.
+        const own = buttons.length === 1
+          ? buttons[0]
+          : buttons.find((button) => norm(ownerTitleOf(button)) === wanted);
+
+        if (!own) {
+          return {
+            status: 'ambiguous',
+            cardTitle: raw(candidate.element.innerText).slice(0, 90),
+            buttonCount: buttons.length,
+            owners: buttons.map((button) => ownerTitleOf(button)).filter(Boolean)
+          };
         }
-        node = node.parentElement;
+        if (isDisabled(own)) {
+          return {
+            status: 'disabled',
+            cardTitle: ownerTitleOf(own) || raw(candidate.element.innerText).slice(0, 90),
+            reason: reasonFor(own)
+          };
+        }
+
+        own.click();
+        return { status: 'clicked', cardTitle: ownerTitleOf(own) || raw(candidate.element.innerText).slice(0, 90) };
       }
     }
-    return false;
+    return { status: 'no-button' };
   }, {
     target: cardTitle,
     btnSource: buttonPattern.source,
     btnFlags: buttonPattern.flags
   });
 
-  if (!clicked) {
-    throw new Error(`Could not begin the request: no enabled "Begin Request" button found for the card "${cardTitle}". The Create a Request UI may have changed.`);
+  if (outcome.status === 'disabled') {
+    throw new Error([
+      `Could not begin the request: the "${outcome.cardTitle}" card's "Begin Request" button is disabled,`,
+      'so this request type cannot be started by the signed-in account.',
+      outcome.reason ? `The UI gives the reason: "${outcome.reason}".` : 'The UI gives no reason.',
+      'Use an account permitted to start this request type, or run a different case type -',
+      'the tool will NOT start a neighbouring request type in its place.'
+    ].join(' '));
   }
 
+  if (outcome.status === 'ambiguous') {
+    throw new Error(
+      `Could not begin the request: found ${outcome.buttonCount} "Begin Request" buttons around the card "${cardTitle}" `
+      + `and none could be attributed to it (owning titles: ${outcome.owners.join(', ') || 'none detected'}). `
+      + 'The Create a Request UI may have changed.'
+    );
+  }
+
+  if (outcome.status !== 'clicked') {
+    throw new Error(`Could not begin the request: no "Begin Request" button found for the card "${cardTitle}". The Create a Request UI may have changed.`);
+  }
+
+  console.log(`[create-case] Began request from the "${outcome.cardTitle}" card.`);
   await page.waitForLoadState('networkidle').catch(() => {});
 }
 

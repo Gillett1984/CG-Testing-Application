@@ -66,7 +66,11 @@
       "Bash(tee /private/tmp/claude-501/-Users-machub-cg-testing-tool-CG-Testing-Application/7bf75c84-09b6-415f-9bc0-e137c68dd422/scratchpad/rerun.log)",
       "Bash(tee /private/tmp/claude-501/-Users-machub-cg-testing-tool-CG-Testing-Application/7bf75c84-09b6-415f-9bc0-e137c68dd422/scratchpad/rerun3.log)",
       "Bash(pkill -f \"ms-playwright/chromium\")",
-      "Bash(disown)"
+      "Bash(disown)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code} -> %{redirect_url}\\\\n\" https://staging.commonground.fairnessfactor.com/login)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code} -> %{redirect_url}\\\\n\" https://staging.commonground.fairnessfactor.com/)",
+      "Bash(COMMON_GROUND_URL=https://staging.commonground.fairnessfactor.com node *)",
+      "Bash(awk '/^@@/{p=\\($0 ~ /clickRequestCardButton|caseCreationPlan/\\)} p')"
     ]
   }
 }
