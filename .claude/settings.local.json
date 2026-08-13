@@ -70,7 +70,8 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code} -> %{redirect_url}\\\\n\" https://staging.commonground.fairnessfactor.com/login)",
       "Bash(curl -s -o /dev/null -w \"%{http_code} -> %{redirect_url}\\\\n\" https://staging.commonground.fairnessfactor.com/)",
       "Bash(COMMON_GROUND_URL=https://staging.commonground.fairnessfactor.com node *)",
-      "Bash(awk '/^@@/{p=\\($0 ~ /clickRequestCardButton|caseCreationPlan/\\)} p')"
+      "Bash(awk '/^@@/{p=\\($0 ~ /clickRequestCardButton|caseCreationPlan/\\)} p')",
+      "Bash(awk '/^@@/{p=\\($0 ~ /waitForInterviewReady|interviewReadySignal|findReadyResponseInput/\\)} p')"
     ]
   }
 }

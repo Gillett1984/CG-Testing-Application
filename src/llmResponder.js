@@ -2021,7 +2021,12 @@ async function createChatCompletion(llm, body) {
       return text;
     } catch (error) {
       if (attempt >= 4 || !isTransientFetchError(error)) {
-        throw error;
+        // Carry the cause chain in the MESSAGE. `error.message` is what lands in run.json,
+        // and undici's is a bare "fetch failed" — indistinguishable after the fact from a
+        // TLS-interception failure (which fails fast) or a DNS/reset (which retried 4x).
+        // describeError already walks .cause; this puts it where the artifact can see it.
+        const attempts = isTransientFetchError(error) ? `${attempt} attempt(s)` : 'no retry (not transient)';
+        throw new Error(`OpenAI request failed after ${attempts}: ${describeError(error)}`, { cause: error });
       }
 
       lastError = error;

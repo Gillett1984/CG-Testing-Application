@@ -88,7 +88,7 @@ export async function runAutomation(config, store, options = {}) {
       artifacts.status = participantResult.passed ? 'passed' : 'failed';
       artifacts.finalUrl = participantInterviewPage.url();
       artifacts.finalVisibleText = await readVisibleBodyText(participantInterviewPage);
-      recordStage(artifacts, 'Participant Getting Started', participantResult.passed ? 'passed' : 'failed', participantResult.stopReason);
+      recordStage(artifacts, 'Participant Getting Started', participantResult.passed ? 'passed' : 'failed', participantResult.stopReason, { blocking: false });
       await participantInterviewPage.screenshot({ path: `${store.runDir}/participant-final.png`, fullPage: true });
       await participantInterviewContext.close();
       artifacts.finishedAt = new Date().toISOString();
@@ -131,7 +131,7 @@ export async function runAutomation(config, store, options = {}) {
     artifacts.completedGettingStarted = requestorResult.completed;
     artifacts.stopReason = requestorResult.stopReason;
     artifacts.policyStopTriggered = requestorResult.policyStopTriggered;
-    recordStage(artifacts, 'Requestor Getting Started', requestorResult.passed ? 'passed' : 'failed', requestorResult.stopReason);
+    recordStage(artifacts, 'Requestor Getting Started', requestorResult.passed ? 'passed' : 'failed', requestorResult.stopReason, { blocking: false });
 
     artifacts.finalUrl = interviewPage.url();
     artifacts.finalVisibleText = await readVisibleBodyText(interviewPage);
@@ -216,7 +216,8 @@ async function runFactLabelingSmoke({ browser, config, store, artifacts, synthet
       raterRole: stage.actorRole,
       ratedParty: stage.ratedParty,
       linkText: stage.linkText,
-      mode: stage.mode
+      mode: stage.mode,
+      artifacts
     });
   } else {
     await openOwnFactReviewForSmokeTest(page, config, artifacts.case);
@@ -286,17 +287,29 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   // needed once the first interview begins (create-case and accept-invitation do
   // not use it), so overlapping it with that browser work hides most of its
   // latency. This changes ONLY timing — the dossier content is unchanged.
-  recordStage(artifacts, 'Generate Scenario Dossiers', 'started');
-  const dossiersPromise = generateScenarioDossiers({
-    llm: config.llm,
-    topic: config.run.scenarioFoundation.topic,
-    scenario: selectedScenario,
-    seed: `${store.runId}:${syntheticCase.reference}`,
-    caseNumber,
-    persona
-  });
-  // Avoid an unhandled rejection if browser setup throws before we await it.
-  dossiersPromise.catch(() => {});
+  // Only generate when an interview will actually run in this session. A resume that starts
+  // after requestor_interview never awaits this promise, and the abandoned chain of OpenAI
+  // calls kept the process alive for minutes after the run had finished and written its
+  // artifacts (CG-0007's alignment resume) — as well as spending tokens nothing consumes.
+  const dossierResumePhase = config.run.resumePhase ?? null;
+  const willRunAnInterview = !dossierResumePhase
+    || WORKFLOW_PHASES.indexOf('requestor_interview') >= WORKFLOW_PHASES.indexOf(dossierResumePhase);
+  let dossiersPromise = null;
+  if (willRunAnInterview) {
+    recordStage(artifacts, 'Generate Scenario Dossiers', 'started');
+    dossiersPromise = generateScenarioDossiers({
+      llm: config.llm,
+      topic: config.run.scenarioFoundation.topic,
+      scenario: selectedScenario,
+      seed: `${store.runId}:${syntheticCase.reference}`,
+      caseNumber,
+      persona
+    });
+    // Avoid an unhandled rejection if browser setup throws before we await it.
+    dossiersPromise.catch(() => {});
+  } else {
+    recordStage(artifacts, 'Generate Scenario Dossiers', 'skipped', `Resuming at "${dossierResumePhase}"; no interview runs in this session.`);
+  }
 
   // One browser context for the whole workflow instead of a fresh one per phase.
   // The dashboard's Next.js bundle (`_next/static/chunks/*`) is ~100+ cold assets
@@ -414,7 +427,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     artifacts
   });
   artifacts.requestorGettingStarted = requestorResult;
-  recordStage(artifacts, 'Requestor Getting Started', requestorResult.passed ? 'passed' : 'failed', requestorResult.stopReason);
+  recordStage(artifacts, 'Requestor Getting Started', requestorResult.passed ? 'passed' : 'failed', requestorResult.stopReason, { blocking: false });
   if (!requestorResult.passed) throw new Error(requestorResult.stopReason);
   }
 
@@ -450,12 +463,18 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
       actorLabel: 'Participant', waitName: 'Participant Rates Requestor Facts', artifacts,
       expectedStep: (t, u) => factLabelingReady(t, u) || /Rate (?:Participant|Request[eo]r)'?s Facts/i.test(t)
     },
-    () => completeParticipantFactReview(participantPage, config, artifacts.case, crossPartyFactLabel)
+    () => completeParticipantFactReview(participantPage, config, artifacts.case, crossPartyFactLabel, artifacts)
   );
   recordStage(artifacts, 'Participant Rates Requestor Facts', 'passed', `Requestor facts labeled ${crossPartyFactLabel}.`);
   }
   await participantPage.screenshot({ path: `${store.runDir}/participant-rates-requestor-facts.png`, fullPage: true });
 
+  // Everything from here to ensureGettingStartedOpen is PREPARATION FOR THE PARTICIPANT
+  // INTERVIEW, so it must be skipped with that phase. Sitting outside the guard, it ran even
+  // when resuming at a later phase and failed on a case whose participant interview was long
+  // finished ("Participant Getting Started did not become available after rating..." while
+  // resuming CG-0007 at "alignment").
+  if (shouldRunPhase('participant_interview')) {
   // Step 6: the Getting Started button does not appear immediately after rating;
   // re-open the case from the dashboard and poll until it is available. No-op when
   // completeParticipantFactReview already returned on a ready input (its
@@ -479,6 +498,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     );
   }
   await ensureGettingStartedOpen(participantPage, config, artifacts.case);
+  }
 
   if (!skipPhase('participant_interview', 'Participant Getting Started')) {
   recordStage(artifacts, 'Participant Getting Started', 'started');
@@ -492,7 +512,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     artifacts
   });
   artifacts.participantGettingStarted = participantResult;
-  recordStage(artifacts, 'Participant Getting Started', participantResult.passed ? 'passed' : 'failed', participantResult.stopReason);
+  recordStage(artifacts, 'Participant Getting Started', participantResult.passed ? 'passed' : 'failed', participantResult.stopReason, { blocking: false });
   if (!participantResult.passed) throw new Error(participantResult.stopReason);
   }
 
@@ -527,13 +547,17 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
       raterRole: 'requestor',
       ratedParty: 'participant',
       linkText: /Rate Participant'?s Facts/i,
-      mode: 'requestor_rates_participant'
+      mode: 'requestor_rates_participant',
+      artifacts
     })
   );
   recordStage(artifacts, 'Requestor Rates Participant Facts', 'passed', `Participant facts labeled ${crossPartyFactLabel}.`);
-  }
+  // Inside the phase block: requestorReviewPage is block-scoped to it. These two lines used to
+  // sit after the closing brace, which threw "requestorReviewPage is not defined" for every
+  // run that got this far — CG-0007 reached it with every prior stage passed.
   await requestorReviewPage.screenshot({ path: `${store.runDir}/requestor-rates-participant-facts.png`, fullPage: true });
   await requestorReviewPage.close();
+  }
 
   artifacts.workflowCompleted = true;
   artifacts.workflowCompletionStage = 'Requestor Rates Participant Facts';
@@ -548,7 +572,7 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     // than a hard 3-minute cap. The report can take several minutes to render, and
     // the dashboard "Latest Alignment: NN%" is read as a fallback below, so there is
     // no benefit to giving up early.
-    const alignmentReport = await waitForAndReadAlignmentReport(reportPage, config, artifacts.case);
+    const alignmentReport = await waitForAndReadAlignmentReport(reportPage, config, artifacts.case, artifacts);
     artifacts.alignmentReport = {
       ...alignmentReport,
       expectedRange: config.run.scenarioFoundation.alignmentScenarios.scenarios
@@ -595,7 +619,15 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     ...scenarioController.executionResults.flatMap((result) => result.softAssertions)
   ];
   if (alignmentReportIssue) artifacts.softAssertions.push(alignmentReportIssue);
-  artifacts.completedGettingStarted = requestorResult.completed && participantResult.completed;
+  // Read from artifacts, not from the phase-local consts: requestorResult/participantResult are
+  // block-scoped to their `if (!skipPhase(...))` blocks, so touching them here threw
+  // "requestorResult is not defined" on every run that reached the end of the workflow.
+  // null (rather than false) when a phase was skipped by a resume — that run did not observe it.
+  const requestorCompleted = artifacts.requestorGettingStarted?.completed ?? null;
+  const participantCompleted = artifacts.participantGettingStarted?.completed ?? null;
+  artifacts.completedGettingStarted = requestorCompleted === null || participantCompleted === null
+    ? null
+    : Boolean(requestorCompleted && participantCompleted);
   artifacts.syntheticUserScenarioCompliant = coverage.syntheticUserScenarioCompliant;
   artifacts.status = fullWorkflowResultStatus({
     workflowCompleted: artifacts.workflowCompleted
@@ -612,13 +644,97 @@ function fullWorkflowResultStatus({ workflowCompleted, behaviorScheduleCompleted
   return workflowCompleted && behaviorScheduleCompleted ? 'passed' : 'failed';
 }
 
-function recordStage(artifacts, name, status, detail = '') {
+function recordStage(artifacts, name, status, detail = '', options = {}) {
   artifacts.stages.push({
     name,
     status,
     detail,
+    // Only meaningful on a failure: false marks a step the run is designed to continue past.
+    ...(status === 'failed' ? { blocking: options.blocking !== false } : {}),
     at: new Date().toISOString()
   });
+}
+
+// Thrown when a step the rest of the workflow depends on could not be completed.
+class StageFailedError extends Error {
+  constructor(stageName, detail, dump) {
+    super([
+      `Stage "${stageName}" failed: ${detail}`,
+      'The run stops here: later steps depend on this one and cannot complete without it.',
+      dump ? `Dump: ${dump}` : 'Dump: could not be written.'
+    ].join(' '));
+    this.name = 'StageFailedError';
+    this.stageName = stageName;
+    this.detail = detail;
+    this.dump = dump;
+  }
+}
+
+// Record a stage failure and, by default, STOP THE RUN.
+//
+// A step that could not be completed leaves the case in a state later steps cannot recover
+// from, and continuing turns one clear failure into a confusing symptom somewhere else: in
+// CG-0004 a clarify-context step that never submitted was recorded 'failed', the run carried
+// on, and the real consequence surfaced 20 minutes later as a fact-rating wait that reloaded
+// until it timed out. Case status is taken from artifacts.status, not from the stage list, so
+// a recorded-but-not-thrown failure does not even fail the case on its own.
+//
+// Pass { blocking: false } only where continuing is the design AND the case result already
+// reflects the failure.
+async function failStage(page, artifacts, name, detail, options = {}) {
+  const blocking = options.blocking !== false;
+  const dump = blocking && page
+    ? await writeDiagnosticDump(page, `stage-failed-${name}`, { stage: name, detail, ...(options.extra ?? {}) })
+    : '';
+  recordStage(artifacts, name, 'failed', dump ? `${detail} Dump: ${dump}` : detail, { blocking });
+  if (!blocking) return;
+  console.error(`[stage] ${name} FAILED — stopping the run. ${detail}`);
+  throw new StageFailedError(name, detail, dump);
+}
+
+function firstBlockingStageFailure(artifacts) {
+  return (artifacts?.stages ?? []).find((stage) => stage.status === 'failed' && stage.blocking !== false) ?? null;
+}
+
+// Guard for waits that depend on earlier steps. If a blocking step already failed, the thing
+// being waited for can never arrive, so fail now with the original cause instead of polling.
+// A net rather than the primary mechanism: failStage normally stops the run at the failure.
+async function assertNoBlockingStageFailure(page, artifacts, waitName) {
+  const failure = firstBlockingStageFailure(artifacts);
+  if (!failure) return;
+  const dump = page
+    ? await writeDiagnosticDump(page, `blocked-${waitName}`, {
+      wait: waitName,
+      blockedBy: failure.name,
+      originalDetail: failure.detail,
+      failedAt: failure.at
+    })
+    : '';
+  throw new Error([
+    `${waitName} cannot proceed: the earlier step "${failure.name}" already failed at ${failure.at}.`,
+    `Original failure: ${failure.detail}`,
+    'Waiting here would poll for something that can never complete.',
+    dump ? `Dump: ${dump}` : 'Dump: could not be written.'
+  ].join('\n'));
+}
+
+// Screenshot + DOM + JSON context, written into the run's results dir under a slug.
+// Returns "slug.{png,html,json}" for the caller to name in its error, or '' if nothing wrote.
+async function writeDiagnosticDump(page, label, report = {}) {
+  const slug = String(label ?? 'dump').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80);
+  const base = `${activeRunDir ?? '.'}/${slug}`;
+  const written = [];
+  if (await page.screenshot({ path: `${base}.png`, fullPage: true }).then(() => true).catch(() => false)) written.push('png');
+  const html = await page.content().catch(() => null);
+  if (html !== null && await writeFile(`${base}.html`, html, 'utf8').then(() => true).catch(() => false)) written.push('html');
+  const body = {
+    capturedAt: new Date().toISOString(),
+    url: page.url(),
+    ...report,
+    visibleText: compactVisibleText(await readVisibleBodyText(page).catch(() => ''), 4000)
+  };
+  if (await writeFile(`${base}.json`, JSON.stringify(body, null, 2), 'utf8').then(() => true).catch(() => false)) written.push('json');
+  return written.length ? `${slug}.{${written.join(',')}}` : '';
 }
 
 function existingCaseFromConfig(config, syntheticCase) {
@@ -1730,13 +1846,57 @@ async function waitForPostProcessing(page, config) {
 
 async function labelFactStatements(page, config, labelText) {
   await waitForFactLabelingReady(page, config, labelText);
+  if (await factStatementsAlreadySubmitted(page)) {
+    console.log('[fact-labels] Statements are already labelled and submitted; moving on without re-rating.');
+    return;
+  }
   const labelingUrl = page.url();
   await selectAllFactStatementLabels(page, config, labelText);
   await submitFactStatementRatings(page);
   await verifyFactStatementSubmission(page, labelingUrl);
 }
 
+// How long an "already finished" reading must hold before a wait accepts it and moves on.
+const STEP_ALREADY_DONE_CONFIRM_MS = 15000;
+
+// True when every statement is labelled and the submit control is spent — the live page shows
+// "9/9 labeled" beside a disabled "Submitted" button. Re-rating here would either no-op or
+// overwrite a completed step, and waiting would burn the full timeout.
+async function factStatementsAlreadySubmitted(page) {
+  return page.evaluate(() => {
+    const norm = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
+    const text = norm(document.body?.innerText);
+    const counter = text.match(/(\d+)\s*\/\s*(\d+)\s+labell?ed/i);
+    if (!counter || Number(counter[1]) < Number(counter[2]) || Number(counter[2]) === 0) return false;
+    return [...document.querySelectorAll('button,[role="button"],input[type="submit"]')].some((node) => {
+      const label = norm(node.innerText || node.value || '');
+      const disabled = Boolean(node.disabled) || node.getAttribute('aria-disabled') === 'true';
+      return /^Submitted$/i.test(label) && disabled;
+    });
+  }).catch(() => false);
+}
+
 async function completeActorPostProcessing(page, config, artifacts, actorLabel, labelText = config.run.scenarioFoundation.topic.workflow.factStatementLabel) {
+  await assertNoBlockingStageFailure(page, artifacts, `${actorLabel} post-processing`);
+  // Discussion Details does not auto-advance: it parks on a status list with a
+  // "Next: <step>" link, and the step page only opens when that link is clicked. Without this
+  // the wait below polls for a step screen that will never appear on its own (CG-0004).
+  await openPendingWorkflowStep(page);
+
+  // Nothing left for this actor: every one of their steps in the status list is already
+  // complete and the case is waiting on the other party. The wait below would poll the full
+  // postCompletionWaitMs for a step screen that will never appear — which is exactly what
+  // CG-0004 did once its clarify step finished and "Next:" moved to "Esha rates your
+  // supporting statements".
+  const ownStatus = (await readWorkflowStatusList(page).catch(() => []))
+    .filter((row) => row.person === 'you');
+  if (ownStatus.length >= WORKFLOW_STATUS_STEPS.length && ownStatus.every((row) => row.status === 'complete')) {
+    const summary = ownStatus.map((row) => row.label).join(', ');
+    console.log(`[workflow] ${actorLabel}: every own post-processing step is already complete (${summary}); moving on.`);
+    recordStage(artifacts, `${actorLabel} Post-Processing`, 'passed', `Already complete on the live case: ${summary}.`);
+    return;
+  }
+
   const firstState = await waitForWorkflowState(page, config, {
     name: `${actorLabel.toLowerCase()} clarify context, excerpt review or fact statement labeling`,
     ready: (text, currentPage) => clarifyContextReady(text, currentPage.url())
@@ -1750,21 +1910,31 @@ async function completeActorPostProcessing(page, config, artifacts, actorLabel, 
   // and the Alignment Brief never unlocks. We complete it by skipping each prompt.
   if (clarifyContextReady(await readVisibleBodyText(page), page.url())) {
     recordStage(artifacts, `${actorLabel} Clarify Context`, 'started', firstState.url);
-    const pathTaken = await skipClarifyContext(page, config, actorLabel);
-    const completed = !pathTaken.startsWith('excerpt-review-tab');
-    console.log(`[clarify-context] ${actorLabel}: ${completed ? 'completed' : 'COULD NOT COMPLETE'} step via ${pathTaken}.`);
-    if (completed) {
-      recordStage(artifacts, `${actorLabel} Clarify Context`, 'passed', `Step submitted without accepting suggestions (${pathTaken}).`);
+    const outcome = await skipClarifyContext(page, config, actorLabel);
+    if (outcome.completed) {
+      console.log(`[clarify-context] ${actorLabel}: step submitted and confirmed complete (${outcome.work || 'nothing to resolve'}).`);
+      recordStage(
+        artifacts,
+        `${actorLabel} Clarify Context`,
+        'passed',
+        `Submit & Continue clicked and the step completed (${outcome.work || 'nothing to resolve'}).`
+      );
     } else {
-      // Record as a soft failure rather than throwing: later stages surface the real stall,
-      // but the artifact now names the step that was left incomplete.
-      recordStage(artifacts, `${actorLabel} Clarify Context`, 'failed', `Could not submit the step (${pathTaken}); the workflow will stall until it is completed.`);
-      artifacts?.softAssertions?.push({
-        type: 'clarify_context_incomplete',
-        passed: false,
-        expected: 'The "Add Helpful Details" step is submitted so the case can advance.',
-        observed: `${actorLabel}: fell back to the Excerpt Review tab; the step remains in progress.`
-      });
+      // Stop here. Previously this fell back to the Excerpt Review tab, which moved the browser
+      // on without completing the step; the case then stalled downstream with an unrelated-
+      // looking symptom (CG-0004). The dump names every card still unresolved.
+      const unresolvedSummary = outcome.unresolved.length
+        ? outcome.unresolved.map((card) => `${card.heading} [controls: ${card.controls.map((c) => c.label + (c.disabled ? '(disabled)' : '')).join(', ') || 'none'}]`).join('; ')
+        : 'none detected';
+      await failStage(
+        page,
+        artifacts,
+        `${actorLabel} Clarify Context`,
+        `"Submit & Continue" did not complete the step (button ${outcome.submission.lastState} after `
+          + `${outcome.submission.clicks} click(s), ${Math.round(outcome.submission.elapsedMs / 1000)}s). `
+          + `${outcome.unresolved.length} of ${outcome.cardCount} card(s) unresolved: ${unresolvedSummary}.`,
+        { extra: { work: outcome.work, submission: outcome.submission, unresolved: outcome.unresolved, contextItems: outcome.contextItems } }
+      );
     }
     await waitForWorkflowState(page, config, {
       name: `${actorLabel.toLowerCase()} excerpt review or fact statement labeling`,
@@ -1838,6 +2008,14 @@ function extractExcerptApprovalCount(text) {
 //
 // Returns the path taken for logging.
 async function skipClarifyContext(page, config, actorLabel = 'actor') {
+  // Wait for the step to actually RENDER before touching it. clarifyContextReady() is true as
+  // soon as the URL is /clarify-context, which happens long before the cards exist: the
+  // CG-0004 dump caught this page still showing "Loading…", so the Skip sweep found nothing,
+  // no Context Item was seen and Submit & Continue did not exist — the step was then reported
+  // unsubmittable when it had simply never been read.
+  const rendered = await waitForClarifyStepRendered(page);
+  if (!rendered) console.warn('[clarify-context] Step did not render within the wait; continuing so the failure carries a dump of what is on screen.');
+
   const skipped = await skipAllHelpfulDetails(page);
   // Context Item cards are a SECOND card type on this step and are not covered by the Skip
   // sweep above; resolve them before testing Submit & Continue.
@@ -1849,40 +2027,158 @@ async function skipClarifyContext(page, config, actorLabel = 'actor') {
     : 0;
   const work = describeClarifyWork(skipped + skippedAgain, contextItems);
 
-  const submitContinue = page.getByRole('button', { name: /Submit\s*&?\s*Continue/i }).first();
-  const visible = await submitContinue.isVisible({ timeout: 1000 }).catch(() => false);
-  const enabled = visible && await submitContinue.isEnabled({ timeout: 500 }).catch(() => false)
-    && (await submitContinue.getAttribute('aria-disabled').catch(() => null)) !== 'true';
-  if (enabled) {
-    await submitContinue.scrollIntoViewIfNeeded().catch(() => {});
-    await submitContinue.click().catch(() => {});
-    await page.waitForLoadState('networkidle').catch(() => {});
-    await page.waitForTimeout(2000);
-    if (!clarifyContextReady(await readVisibleBodyText(page), page.url())) {
-      return work ? `submit-continue after ${work}` : 'submit-continue';
+  // The step is only COMPLETE once "Submit & Continue" has been clicked and the page has
+  // actually left the clarify step. Skipping/saving the cards alone leaves it in progress, and
+  // everything downstream (excerpt review, fact rating, alignment brief) waits on it forever.
+  const submission = await submitClarifyContext(page);
+  const cards = await readClarifyCards(page).catch(() => []);
+  const unresolved = cards.filter((card) => !card.resolved);
+
+  return {
+    completed: submission.completed,
+    work,
+    contextItems,
+    unresolved,
+    submission,
+    cardCount: cards.length
+  };
+}
+
+// Step pages reachable from the Discussion Details status list via its "Next: <step>" link.
+const PENDING_STEP_LINKS = [
+  { name: /Add Helpful Details/i, route: /\/clarify-context/i },
+  { name: /Review Your Excerpts/i, route: /\/excerpt-review/i },
+  { name: /Rate (?:Your|[\w'’-]+'?s) Supporting Statements/i, route: /\/(?:fact-review|cross-rate)/i }
+];
+
+// On the case detail page, open the step the app says is next. No-op when already on a step
+// route, so it is safe to call before any post-processing wait.
+async function openPendingWorkflowStep(page) {
+  const url = page.url();
+  if (PENDING_STEP_LINKS.some((step) => step.route.test(url))) return false;
+
+  for (const step of PENDING_STEP_LINKS) {
+    for (const role of ['link', 'button']) {
+      const control = page.getByRole(role, { name: step.name }).first();
+      if (!await control.isVisible({ timeout: 750 }).catch(() => false)) continue;
+      if (!await control.isEnabled({ timeout: 500 }).catch(() => false)) continue;
+      await control.scrollIntoViewIfNeeded().catch(() => {});
+      if (!await control.click({ timeout: 5000 }).then(() => true).catch(() => false)) continue;
+      await page.waitForLoadState('networkidle').catch(() => {});
+      await page.waitForTimeout(2500);
+      console.log(`[workflow] Opened the pending step via its "${step.name.source.replace(/\\/g, '')}" link → ${page.url()}`);
+      return true;
     }
   }
+  return false;
+}
 
-  // The step did not complete. Capture the page BEFORE navigating away: the counter, the
-  // cards still outstanding and every control they expose are the only evidence of why
-  // Submit & Continue stayed inert, and none of it survives the tab click below.
-  const diagnostics = await captureClarifyContextDiagnostics(page, actorLabel, contextItems);
+// Poll until the clarify step's own UI is on screen — a card, the "N/M reviewed" counter, or
+// the Submit & Continue button — and the page is not still a bare "Loading…" shell.
+// Returns what it found, or null if the step never rendered in time.
+async function waitForClarifyStepRendered(page, timeoutMs = 60000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    await dismissTourOverlay(page, 'clarify step render');
+    last = await page.evaluate(() => {
+      const norm = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
+      const text = norm(document.body?.innerText);
+      const hasSubmit = [...document.querySelectorAll('button,[role="button"],input[type="submit"]')]
+        .some((node) => /Submit\s*&?\s*Continue/i.test(norm(node.innerText || node.value || '')));
+      return {
+        hasCards: /(?:Context Item|Helpful Detail)\s*\d+/i.test(text),
+        hasCounter: /\d+\s*\/\s*\d+\s+reviewed/i.test(text),
+        hasSubmit,
+        // A shell that is only chrome + "Loading…" is not the step.
+        stillLoading: /\bLoading\b/i.test(text) && text.length < 400,
+        textLength: text.length
+      };
+    }).catch(() => null);
 
-  // Fallback: click the Excerpt Review tab directly (role=tab, else button/link/text).
-  // NOTE: this only moves the browser on; it does NOT complete the step, so the workflow
-  // will stall later. Kept as a last resort and reported distinctly so the log says so.
-  const tab = page.getByRole('tab', { name: /Excerpt Review/i }).first();
-  if (await tab.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await tab.click().catch(() => {});
-  } else {
-    await page.getByRole('button', { name: /^Excerpt Review$/i }).first().click().catch(async () => {
-      await page.getByText(/^Excerpt Review$/i).first().click().catch(() => {});
-    });
+    if (last && !last.stillLoading && (last.hasCards || last.hasCounter || last.hasSubmit)) {
+      return last;
+    }
+    await page.waitForTimeout(1000);
   }
-  await page.waitForLoadState('networkidle').catch(() => {});
-  await page.waitForTimeout(1500);
-  const suffix = [work, diagnostics].filter(Boolean).join('; ');
-  return `excerpt-review-tab (step NOT completed${suffix ? `: ${suffix}` : ''})`;
+  return null;
+}
+
+// Click "Submit & Continue" and confirm the step really completed.
+//
+// The button stays disabled until every card is skipped or saved, and it can take a moment to
+// enable after the last save settles — so poll rather than testing once. Completion is checked
+// against the page leaving the clarify step, not against the click appearing to succeed.
+async function submitClarifyContext(page, timeoutMs = 90000) {
+  const deadline = Date.now() + timeoutMs;
+  const startedAt = Date.now();
+  let clicks = 0;
+  let lastState = 'not found';
+
+  while (Date.now() < deadline) {
+    const button = page.getByRole('button', { name: /Submit\s*&?\s*Continue/i }).first();
+    const visible = await button.isVisible({ timeout: 1000 }).catch(() => false);
+    if (!visible) {
+      // Already off the step (e.g. a prior click landed) — confirm and finish.
+      if (!clarifyContextReady(await readVisibleBodyText(page), page.url())) {
+        return { completed: true, clicks, lastState: 'step already left', elapsedMs: Date.now() - startedAt };
+      }
+      lastState = 'not visible';
+      await page.waitForTimeout(2000);
+      continue;
+    }
+
+    const enabled = await button.isEnabled({ timeout: 500 }).catch(() => false)
+      && (await button.getAttribute('aria-disabled').catch(() => null)) !== 'true';
+    lastState = enabled ? 'enabled' : 'visible but disabled';
+
+    if (enabled) {
+      await button.scrollIntoViewIfNeeded().catch(() => {});
+      if (await button.click({ timeout: 5000 }).then(() => true).catch(() => false)) clicks += 1;
+      await page.waitForLoadState('networkidle').catch(() => {});
+      await page.waitForTimeout(2500);
+      if (!clarifyContextReady(await readVisibleBodyText(page), page.url())) {
+        return { completed: true, clicks, lastState: 'submitted', elapsedMs: Date.now() - startedAt };
+      }
+      lastState = 'clicked but still on the clarify step';
+    }
+
+    await page.waitForTimeout(2000);
+  }
+
+  return { completed: false, clicks, lastState, elapsedMs: Date.now() - startedAt };
+}
+
+// Every card on the step with its resolution state and the controls it exposes.
+async function readClarifyCards(page) {
+  return page.evaluate(() => {
+    const norm = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
+    const ACTIONS = 'button, [role="button"], input[type="submit"], a';
+    const describe = (node) => ({
+      label: norm(node.innerText || node.value || node.getAttribute('aria-label') || ''),
+      disabled: Boolean(node.disabled) || node.getAttribute('aria-disabled') === 'true'
+    });
+    return [...document.querySelectorAll('*')]
+      .filter((node) => {
+        const text = norm(node.textContent);
+        if (!/^(Context Item|Helpful Detail)\b/i.test(text)) return false;
+        return ![...node.children].some((child) => /^(Context Item|Helpful Detail)\b/i.test(norm(child.textContent)));
+      })
+      .map((node) => {
+        let card = node;
+        for (let depth = 0; depth < 8 && card?.parentElement; depth += 1) {
+          if ([...card.querySelectorAll(ACTIONS)].some((action) => norm(action.innerText))) break;
+          card = card.parentElement;
+        }
+        return {
+          heading: norm(node.textContent).slice(0, 80),
+          // "Change answer" is the marker the app leaves on a card that has been resolved.
+          resolved: /Change answer/i.test(norm(card.innerText)),
+          text: norm(card.innerText).slice(0, 400),
+          controls: [...card.querySelectorAll(ACTIONS)].map(describe).filter((control) => control.label)
+        };
+      });
+  });
 }
 
 function describeClarifyWork(skipped, contextItems) {
@@ -1924,8 +2220,12 @@ async function skipAllHelpfulDetails(page) {
   return skipped;
 }
 
-// Controls that resolve a Context Item card without writing anything into the case.
-const CONTEXT_ITEM_DISMISS = /^\s*(Skip|Dismiss|Reject|Ignore|Decline|No,? thanks|Not accurate|Leave as is)\s*$/i;
+// Context Item controls, read off the live page: "Accept Suggested" writes the suggestion in,
+// "I Don't Know" resolves the card without adding content (the app's own way of declining, and
+// exactly what the invent-nothing rule wants). "Save Context" stays disabled until text is
+// typed, so it is never used here. The apostrophe is a curly U+2019, hence Don.?t.
+const CONTEXT_ITEM_ACCEPT = /^\s*Accept(?:\s+Suggested)?\s*$/i;
+const CONTEXT_ITEM_DISMISS = /^\s*(I\s*Don.?t\s*Know|Skip|Dismiss|Reject|Ignore|Decline|No,? thanks|Not accurate|Leave as is)\s*$/i;
 
 // Resolve the OTHER card type on "Clarify & Improve". Context Items are not Helpful Details:
 // they flag an unclear reference and offer a pre-filled answer under a "POSSIBLE CONTEXT
@@ -1956,7 +2256,7 @@ async function resolveContextItems(page) {
     attempted.push(card.excerpt);
 
     const scope = page.locator('[data-cg-context-item="1"]').first();
-    const wanted = card.identical ? /^\s*Accept\s*$/i : CONTEXT_ITEM_DISMISS;
+    const wanted = card.identical ? CONTEXT_ITEM_ACCEPT : CONTEXT_ITEM_DISMISS;
     const control = scope.getByRole('button', { name: wanted }).first();
 
     if (await clickWhenActionable(control)) {
@@ -2068,73 +2368,6 @@ async function clickWhenActionable(locator) {
   return locator.click({ timeout: 3000 }).then(() => true).catch(() => false);
 }
 
-// Dump everything needed to diagnose a clarify step that would not submit: a full-page
-// screenshot, the raw DOM, and a JSON control inventory (every button with its enabled state,
-// the review counter, and each card's own controls). Written into the run's results dir so the
-// next failure can be read without re-running against staging.
-async function captureClarifyContextDiagnostics(page, actorLabel, contextItems) {
-  const slug = String(actorLabel ?? 'actor').toLowerCase().replace(/\s+/g, '-');
-  const base = `${activeRunDir ?? '.'}/clarify-context-not-completed-${slug}`;
-  const written = [];
-
-  if (await page.screenshot({ path: `${base}.png`, fullPage: true }).then(() => true).catch(() => false)) {
-    written.push(`${slug}.png`);
-  }
-
-  const html = await page.content().catch(() => null);
-  if (html !== null && await writeFile(`${base}.html`, html, 'utf8').then(() => true).catch(() => false)) {
-    written.push(`${slug}.html`);
-  }
-
-  const inventory = await page.evaluate(() => {
-    const norm = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
-    const ACTIONS = 'button, [role="button"], input[type="submit"], a';
-    const describe = (node) => {
-      const rect = node.getBoundingClientRect();
-      return {
-        tag: node.tagName.toLowerCase(),
-        label: norm(node.innerText || node.value || node.getAttribute('aria-label') || ''),
-        disabled: Boolean(node.disabled),
-        ariaDisabled: node.getAttribute('aria-disabled'),
-        visible: rect.width > 0 && rect.height > 0
-      };
-    };
-    const body = norm(document.body?.innerText);
-    return {
-      url: window.location.href,
-      counter: body.match(/(\d+)\s*\/\s*(\d+)\s+reviewed/i)?.[0] ?? null,
-      controls: Array.from(document.querySelectorAll(ACTIONS)).map(describe).filter((control) => control.label),
-      cards: Array.from(document.querySelectorAll('*'))
-        .filter((node) => {
-          const text = norm(node.textContent);
-          if (!/^(Context Item|Helpful Detail)\b/i.test(text)) return false;
-          return !Array.from(node.children).some((child) => /^(Context Item|Helpful Detail)\b/i.test(norm(child.textContent)));
-        })
-        .map((node) => {
-          let card = node;
-          for (let depth = 0; depth < 8 && card?.parentElement; depth += 1) {
-            if (Array.from(card.querySelectorAll(ACTIONS)).some((action) => norm(action.innerText))) break;
-            card = card.parentElement;
-          }
-          return {
-            heading: norm(node.textContent).slice(0, 80),
-            resolved: /Change answer/i.test(norm(card.innerText)),
-            text: norm(card.innerText).slice(0, 600),
-            controls: Array.from(card.querySelectorAll(ACTIONS)).map(describe).filter((control) => control.label)
-          };
-        })
-    };
-  }).catch(() => null);
-
-  const report = { actor: actorLabel, capturedAt: new Date().toISOString(), contextItems, page: inventory };
-  if (await writeFile(`${base}.json`, JSON.stringify(report, null, 2), 'utf8').then(() => true).catch(() => false)) {
-    written.push(`${slug}.json`);
-  }
-
-  if (written.length) console.log(`[clarify-context] Wrote diagnostics: clarify-context-not-completed-{${written.map((name) => name.split('.').pop()).join(',')}}.`);
-  return written.length ? `diagnostics: clarify-context-not-completed-${slug}.{${written.map((name) => name.split('.').pop()).join(',')}}` : '';
-}
-
 async function submitExcerptReview(page, config) {
   const startedAt = Date.now();
   let deadline = startedAt + config.run.postCompletionWaitMs;
@@ -2142,6 +2375,7 @@ async function submitExcerptReview(page, config) {
   let lastApprovalCount = null;
   let lastSubmitState = 'not found';
   let gateSince = 0;
+  let allApprovedSince = 0;
 
   while (Date.now() < deadline) {
     lastText = await readVisibleBodyText(page);
@@ -2162,19 +2396,42 @@ async function submitExcerptReview(page, config) {
       deadline = Math.max(deadline, Date.now() + 180000);
     }
 
+    // Approve whatever is still outstanding. The app auto-approves unchanged excerpts, but a
+    // REVISED one keeps its own "Approve" button and Submit stays disabled until every one is
+    // approved — CG-0007 sat at "30/57 approved" with 27 un-clicked Approve buttons because
+    // the only bulk control looked for here was "Approve All", which this page does not have
+    // (it offers "Approve Shown").
     if (lastApprovalCount?.total > 0 && lastApprovalCount.approved < lastApprovalCount.total) {
-      const approveAll = page.getByRole('button', { name: /^Approve All$/i }).first();
-      const canApproveAll = await approveAll.isVisible({ timeout: 300 }).catch(() => false)
-        && await approveAll.isEnabled({ timeout: 300 }).catch(() => false);
-      if (canApproveAll) {
-        await approveAll.click();
-        await page.waitForTimeout(750);
-        continue;
+      const approval = await approveOutstandingExcerpts(page);
+      console.log(
+        `[excerpt-review] Approval pass: ${approval.bulkClicks} bulk click(s), ${approval.singleClicks} individual click(s) → `
+        + `${approval.count ? `${approval.count.approved}/${approval.count.total}` : 'counter unreadable'} approved.`
+      );
+      lastApprovalCount = approval.count ?? lastApprovalCount;
+      if (!approval.done) {
+        // No further progress possible this pass; fall through so the Submit probe and the
+        // loop's own deadline decide, rather than spinning on the same buttons.
+        await page.waitForTimeout(1500);
       }
     }
 
     const submitState = await findExcerptSubmitControl(page);
     lastSubmitState = submitState.description;
+
+    // Already submitted: every excerpt approved and the page exposes no Submit control at all
+    // (CG-0004 sat at "75/75 approved" with only nav/tab/filter buttons). Polling for a
+    // control that does not exist burned the full postCompletionWaitMs. Confirmed over a
+    // short grace so a control that renders late is not missed.
+    if (!submitState.control && lastApprovalCount?.total > 0 && lastApprovalCount.approved >= lastApprovalCount.total) {
+      if (!allApprovedSince) allApprovedSince = Date.now();
+      else if (Date.now() - allApprovedSince >= STEP_ALREADY_DONE_CONFIRM_MS) {
+        console.log(`[excerpt-review] ${lastApprovalCount.approved}/${lastApprovalCount.total} approved and no Submit control on the page — the step is already submitted; moving on.`);
+        return;
+      }
+    } else {
+      allApprovedSince = 0;
+    }
+
     if (submitState.control) {
       await submitState.control.scrollIntoViewIfNeeded().catch(() => {});
       await submitState.control.click();
@@ -2189,14 +2446,108 @@ async function submitExcerptReview(page, config) {
   const approvalDescription = lastApprovalCount
     ? `${lastApprovalCount.approved}/${lastApprovalCount.total} approved`
     : 'approval counter not detected';
+  const unapproved = await readUnapprovedExcerpts(page);
+  const dump = await writeDiagnosticDump(page, 'excerpt-review-not-submitted', {
+    approvalState: approvalDescription,
+    submitState: lastSubmitState,
+    unapprovedCount: unapproved.length,
+    unapproved
+  });
   throw new Error([
     `Excerpt Review Submit did not become enabled within ${Math.round(config.run.postCompletionWaitMs / 60000)} minutes.`,
     `Elapsed: ${Math.round((Date.now() - startedAt) / 1000)} seconds`,
     `Approval state: ${approvalDescription}`,
     `Submit state: ${lastSubmitState}`,
+    `Excerpts still showing an Approve button: ${unapproved.length}${unapproved.length ? ` — ${unapproved.slice(0, 8).map((item) => item.heading).join('; ')}` : ''}`,
+    dump ? `Dump: ${dump}` : 'Dump: could not be written.',
     `Current URL: ${page.url()}`,
     `Last visible page text: ${compactVisibleText(lastText, 1800)}`
   ].join('\n'));
+}
+
+// Drive the approval counter to full: bulk control first, then per-excerpt "Approve" buttons.
+//
+// "Approve Shown" acts on whatever the active filter displays, so the pending filter is
+// selected first. Progress is measured by the counter, not by clicks: the bulk button stays
+// enabled whether or not it did anything, so a few clicks that move nothing means it is not
+// applicable here and the per-excerpt path takes over.
+async function approveOutstandingExcerpts(page, timeoutMs = 240000) {
+  const deadline = Date.now() + timeoutMs;
+  let bulkClicks = 0;
+  let singleClicks = 0;
+  let lastApproved = -1;
+  let stagnant = 0;
+  let bulkExhausted = false;
+
+  // Show the outstanding ones so a "shown"-scoped bulk control covers them.
+  const pendingFilter = page.getByRole('button', { name: /^(?:Pending Approval|Show What.?s Pending|Revised Only)$/i }).first();
+  if (await clickWhenActionable(pendingFilter)) await page.waitForTimeout(2000);
+
+  let count = extractExcerptApprovalCount(await readVisibleBodyText(page));
+  while (Date.now() < deadline) {
+    count = extractExcerptApprovalCount(await readVisibleBodyText(page));
+    if (count?.total > 0 && count.approved >= count.total) {
+      return { done: true, bulkClicks, singleClicks, count };
+    }
+
+    const approved = count?.approved ?? -1;
+    stagnant = approved === lastApproved ? stagnant + 1 : 0;
+    lastApproved = approved;
+    if (stagnant >= 3) bulkExhausted = true;   // bulk is not moving the counter
+    if (stagnant >= 10) break;                 // nothing is moving it
+
+    if (!bulkExhausted) {
+      const bulk = page.getByRole('button', { name: /^Approve (?:Shown|All)$/i }).first();
+      if (await clickWhenActionable(bulk)) {
+        bulkClicks += 1;
+        await page.waitForTimeout(2500);
+        continue;
+      }
+      bulkExhausted = true;
+    }
+
+    // Per-excerpt fallback. Re-query every pass: approving one re-renders the list.
+    const approveButtons = page.getByRole('button', { name: /^Approve$/i });
+    const total = await approveButtons.count().catch(() => 0);
+    if (!total) { await page.waitForTimeout(1500); continue; }
+    let clicked = false;
+    for (let index = 0; index < total; index += 1) {
+      if (await clickWhenActionable(approveButtons.nth(index))) {
+        singleClicks += 1;
+        clicked = true;
+        await page.waitForTimeout(400);
+        break;
+      }
+    }
+    if (!clicked) await page.waitForTimeout(1500);
+  }
+
+  count = extractExcerptApprovalCount(await readVisibleBodyText(page));
+  return { done: Boolean(count?.total > 0 && count.approved >= count.total), bulkClicks, singleClicks, count };
+}
+
+// Excerpt cards still showing an "Approve" button, for the failure dump.
+async function readUnapprovedExcerpts(page) {
+  return page.evaluate(() => {
+    const norm = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
+    const ACTIONS = 'button,[role="button"]';
+    return [...document.querySelectorAll(ACTIONS)]
+      .filter((node) => /^Approve$/i.test(norm(node.innerText)))
+      .map((node) => {
+        let card = node;
+        for (let depth = 0; depth < 6 && card.parentElement; depth += 1) {
+          if (/Excerpt\s*\d+/i.test(norm(card.textContent))) break;
+          card = card.parentElement;
+        }
+        const text = norm(card.textContent);
+        return {
+          heading: (text.match(/Excerpt\s*\d+[^.]{0,40}/i) || [text.slice(0, 60)])[0],
+          approveDisabled: Boolean(node.disabled) || node.getAttribute('aria-disabled') === 'true',
+          snippet: text.slice(0, 180)
+        };
+      })
+      .slice(0, 40);
+  }).catch(() => []);
 }
 
 async function findExcerptSubmitControl(page) {
@@ -2384,23 +2735,162 @@ async function openCrossPartyFactReviewIfRequired(page, createdCase, options) {
   return false;
 }
 
-async function completeParticipantFactReview(page, config, createdCase, labelText) {
+async function completeParticipantFactReview(page, config, createdCase, labelText, artifacts = null) {
   return completeCrossPartyFactReview(page, config, createdCase, labelText, {
     raterRole: 'participant',
     ratedParty: 'requestor',
     linkText: /Rate Request[eo]r'?s Facts/i,
     mode: 'participant_rates_requestor',
-    allowGettingStartedReady: true
+    allowGettingStartedReady: true,
+    artifacts
   });
 }
 
+// The Discussion Details "status list" steps, in the order Common Ground runs them. Matching
+// is by the phrase each row uses ("Atika adds helpful details"), so the person's name is
+// whatever precedes it.
+// Each step appears twice in the list: once for the signed-in user in imperative form
+// ("Add Helpful Details") and once per other party in third person ("Esha adds helpful
+// details"). Verified against the live CG-0004 Discussion Details markup — an earlier guess
+// at these labels matched only the third-person form and missed every own-party row.
+const WORKFLOW_STATUS_STEPS = [
+  { key: 'share_perspective', own: /^share your perspective$/i, other: /\bshares? their perspective$/i },
+  { key: 'helpful_details', own: /^add helpful details$/i, other: /\badds? helpful details$/i },
+  { key: 'excerpt_review', own: /^review your excerpts$/i, other: /\breviews? their excerpts$/i },
+  { key: 'fact_rating', own: /^rate your supporting statements$/i, other: /\brates? their supporting statements$/i }
+];
+
+// Read the status list as ordered rows with a best-effort status per row.
+//
+// NOTE: staging renders status as an icon, not text, so the signals below (aria-busy, spinner
+// classes, check glyphs, "complete"/"in progress" wording) are deliberately broad and any row
+// that matches none is reported 'unknown' — an unknown row never drives a decision. The
+// failure dump written by captureStatusListDump records the real markup so these can be
+// tightened against it.
+async function readWorkflowStatusList(page) {
+  const steps = WORKFLOW_STATUS_STEPS.map((step) => ({
+    key: step.key,
+    own: { source: step.own.source, flags: step.own.flags },
+    other: { source: step.other.source, flags: step.other.flags }
+  }));
+  return page.evaluate((stepDefs) => {
+    const norm = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+    const patterns = stepDefs.flatMap((def) => [
+      { key: def.key, scope: 'own', re: new RegExp(def.own.source, def.own.flags) },
+      { key: def.key, scope: 'other', re: new RegExp(def.other.source, def.other.flags) }
+    ]);
+
+    // Status is conveyed purely by the row's icon; there is no status text anywhere. Read the
+    // SVG path data, which is stable and semantic, with class hints as a secondary signal:
+    //   complete    check    path "M5 13l4 4L19 7", icon chip bg-cg-blue + text-white
+    //   in-progress spinner  class motion-safe:animate-spin on a dashed circle
+    //   pending     clock    path "M12 8v4l3 2", row faded via text-cg-blue/50
+    const statusOf = (html, text) => {
+      if (/animate-spin|aria-busy="true"|role="status"/i.test(html)) return 'in-progress';
+      if (/M5 13l4 4L19 7/.test(html)) return 'complete';
+      if (/M12 8v4l3 2/.test(html) || /text-cg-blue\/50/.test(html)) return 'pending';
+      if (/\bin[- ]progress\b/i.test(text)) return 'in-progress';
+      if (/\bcomplete(?:d)?\b|\bdone\b/i.test(text) || /[\u2713\u2714]/.test(text)) return 'complete';
+      return 'unknown';
+    };
+
+    const rows = [];
+    const claimed = new Set();
+
+    for (const pattern of patterns) {
+      const labelNodes = [...document.querySelectorAll('li,div,span,p')]
+        .filter((node) => pattern.re.test(norm(node.textContent)))
+        .filter((node) => ![...node.children].some((child) => pattern.re.test(norm(child.textContent))));
+
+      for (const labelNode of labelNodes) {
+        if (claimed.has(labelNode)) continue;
+        claimed.add(labelNode);
+
+        // Widen to the row: the nearest ancestor that carries the icon, bounded by length so
+        // it can never swallow a sibling row.
+        let row = labelNode;
+        for (let depth = 0; depth < 5 && row.parentElement; depth += 1) {
+          if (/<svg/i.test(row.innerHTML || '') && norm(row.textContent).length <= 120) break;
+          if (norm(row.parentElement.textContent).length > 120) break;
+          row = row.parentElement;
+        }
+
+        const label = norm(labelNode.textContent).slice(0, 120);
+        rows.push({
+          key: pattern.key,
+          label,
+          status: statusOf(row.outerHTML || '', norm(row.textContent)),
+          // Own rows are imperative and name nobody; third-person rows lead with the name.
+          person: pattern.scope === 'own' ? 'you' : (label.match(/^([A-Z][\w'\u2019-]*)\b/) || [])[1] || 'other'
+        });
+      }
+    }
+    return rows;
+  }, steps);
+}
+
+// The inconsistency this guards against: Common Ground can leave an earlier step spinning
+// while later steps in the SAME person's list are already complete. The earlier step then
+// never flips, so any wait gated on it polls until it times out. A later completed step is
+// proof the earlier one has effectively been passed, whatever its spinner says.
+function findOutOfOrderStatus(rows) {
+  const order = WORKFLOW_STATUS_STEPS.map((step) => step.key);
+  const byPerson = new Map();
+  for (const row of rows) {
+    const key = row.person || '(unnamed)';
+    if (!byPerson.has(key)) byPerson.set(key, []);
+    byPerson.get(key).push(row);
+  }
+
+  for (const [person, personRows] of byPerson) {
+    const sorted = [...personRows].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+    for (let index = 0; index < sorted.length; index += 1) {
+      const stalled = sorted[index];
+      if (stalled.status !== 'in-progress') continue;
+      const laterComplete = sorted.slice(index + 1).find((row) => row.status === 'complete');
+      if (laterComplete) return { person, stalled, laterComplete };
+    }
+  }
+  return null;
+}
+
+// Write the evidence needed to fix a stuck status list: screenshot, DOM, and the parsed rows
+// (so a wrong parse is visible next to the markup that produced it).
+async function captureStatusListDump(page, label, rows, extra = {}) {
+  const slug = String(label ?? 'wait').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const base = `${activeRunDir ?? '.'}/status-list-stuck-${slug}`;
+  const written = [];
+  if (await page.screenshot({ path: `${base}.png`, fullPage: true }).then(() => true).catch(() => false)) written.push('png');
+  const html = await page.content().catch(() => null);
+  if (html !== null && await writeFile(`${base}.html`, html, 'utf8').then(() => true).catch(() => false)) written.push('html');
+  const report = {
+    label,
+    capturedAt: new Date().toISOString(),
+    url: page.url(),
+    parsedRows: rows,
+    ...extra
+  };
+  if (await writeFile(`${base}.json`, JSON.stringify(report, null, 2), 'utf8').then(() => true).catch(() => false)) written.push('json');
+  return written.length ? `status-list-stuck-${slug}.{${written.join(',')}}` : '';
+}
+
+// Refresh budget for a wait that reloads the case page while polling. Bounded independently of
+// the time deadline so a page that reloads cleanly but never advances fails with a dump
+// instead of grinding out the full postCompletionWaitMs.
+const MAX_STATUS_REFRESHES = 24;
+
 async function completeCrossPartyFactReview(page, config, createdCase, labelText, options) {
   const startedAt = Date.now();
+  const waitName = `${capitalizeFirst(options.raterRole)} rating of ${options.ratedParty} facts`;
+  // A step this wait depends on may already have failed; polling would never resolve.
+  await assertNoBlockingStageFailure(page, options.artifacts, waitName);
   let deadline = startedAt + config.run.postCompletionWaitMs;
   let lastText = '';
   let lastUrl = page.url();
   let lastRefreshAt = 0;
   let gateSince = 0;
+  let refreshes = 0;
+  let lastRows = [];
 
   while (Date.now() < deadline) {
     lastText = await readVisibleBodyText(page);
@@ -2408,6 +2898,26 @@ async function completeCrossPartyFactReview(page, config, createdCase, labelText
 
     if (factLabelingReady(lastText, lastUrl)) {
       await labelFactStatements(page, config, labelText);
+      return;
+    }
+
+    // Do not gate on one step's spinner. Common Ground can leave an earlier step in progress
+    // while later steps for the same person are already complete (CG-0004: "Atika adds helpful
+    // details" spinning behind a completed "reviews their excerpts" and "rates their supporting
+    // statements"). The step never flips, so polling for it just reloads until the timeout.
+    // Treat a later completed step as proof the earlier one is done and stop waiting.
+    lastRows = await readWorkflowStatusList(page).catch(() => []);
+    const outOfOrder = findOutOfOrderStatus(lastRows);
+    if (outOfOrder) {
+      const detail = `"${outOfOrder.stalled.label}" is still in progress while the later step `
+        + `"${outOfOrder.laterComplete.label}" is already complete`;
+      console.warn(`[status-list] ${waitName}: ${detail}. Treating the earlier step as done and moving on.`);
+      options.artifacts?.softAssertions?.push({
+        type: 'status_list_out_of_order',
+        passed: false,
+        expected: 'Discussion Details steps complete in order.',
+        observed: `${detail}. The tool stopped waiting on the earlier step and continued.`
+      });
       return;
     }
 
@@ -2452,17 +2962,40 @@ async function completeCrossPartyFactReview(page, config, createdCase, labelText
     }
 
     if (Date.now() - lastRefreshAt >= 10000) {
+      if (refreshes >= MAX_STATUS_REFRESHES) {
+        const dump = await captureStatusListDump(page, waitName, lastRows, {
+          refreshes,
+          elapsedSeconds: Math.round((Date.now() - startedAt) / 1000),
+          visibleText: compactVisibleText(lastText, 4000)
+        });
+        throw new Error([
+          `${waitName} did not become available after ${refreshes} page refreshes.`,
+          `Elapsed: ${Math.round((Date.now() - startedAt) / 1000)} seconds (refresh cap reached before the ${Math.round(config.run.postCompletionWaitMs / 60000)}-minute timeout).`,
+          `Status list rows parsed: ${lastRows.length ? lastRows.map((row) => `${row.label} [${row.status}]`).join(' | ') : 'none recognised'}`,
+          dump ? `Dump: ${dump}` : 'Dump: could not be written.',
+          `Current URL: ${lastUrl}`,
+          `Last visible page text: ${compactVisibleText(lastText, 1800)}`
+        ].join('\n'));
+      }
       await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
       await page.waitForLoadState('networkidle').catch(() => {});
       lastRefreshAt = Date.now();
+      refreshes += 1;
     } else {
       await page.waitForTimeout(2000);
     }
   }
 
+  const dump = await captureStatusListDump(page, waitName, lastRows, {
+    refreshes,
+    elapsedSeconds: Math.round((Date.now() - startedAt) / 1000),
+    reason: 'time deadline'
+  });
   throw new Error([
-    `${capitalizeFirst(options.raterRole)} rating of ${options.ratedParty} facts did not become available within ${Math.round(config.run.postCompletionWaitMs / 60000)} minutes.`,
-    `Elapsed: ${Math.round((Date.now() - startedAt) / 1000)} seconds`,
+    `${waitName} did not become available within ${Math.round(config.run.postCompletionWaitMs / 60000)} minutes.`,
+    `Elapsed: ${Math.round((Date.now() - startedAt) / 1000)} seconds after ${refreshes} refresh(es)`,
+    `Status list rows parsed: ${lastRows.length ? lastRows.map((row) => `${row.label} [${row.status}]`).join(' | ') : 'none recognised'}`,
+    dump ? `Dump: ${dump}` : 'Dump: could not be written.',
     `Current URL: ${lastUrl}`,
     `Last visible page text: ${compactVisibleText(lastText, 1800)}`
   ].join('\n'));
@@ -2523,7 +3056,8 @@ async function openCaseAlignmentReport(page, config, createdCase) {
   // open the wrong case's report.
 }
 
-async function waitForAndReadAlignmentReport(page, config, createdCase) {
+async function waitForAndReadAlignmentReport(page, config, createdCase, artifacts = null) {
+  await assertNoBlockingStageFailure(page, artifacts, 'Alignment report');
   const startedAt = Date.now();
   let deadline = startedAt + config.run.postCompletionWaitMs;
   let lastText = '';
@@ -2571,7 +3105,9 @@ async function waitForAndReadAlignmentReport(page, config, createdCase) {
       continue;
     }
 
-    if (/alignment report/i.test(lastText)) {
+    // "Your Alignment Brief" is the link's live wording; matching only "alignment report" meant
+    // the brief was never opened.
+    if (/alignment report|alignment brief/i.test(lastText)) {
       await openCaseAlignmentReport(page, config, createdCase);
       await page.waitForTimeout(1000);
       continue;
@@ -2664,8 +3200,14 @@ function extractDashboardAlignmentScore(text, createdCase) {
 function onAlignmentReportPage(url = '', text = '') {
   if (/alignment-report/i.test(String(url ?? ''))) return true;
   if (isDashboardPage(url, text)) return false;
+  const value = String(text ?? '');
   // Positive markers of the single-case report (vs. the dashboard's case list).
-  return /\b\d{1,3}(?:\.\d+)?\s*\/\s*100\b/.test(String(text ?? '')) || /alignment\s+threshold/i.test(String(text ?? ''));
+  // "Current Alignment:" is the completed case-detail page, which prints the score directly
+  // ("Current Alignment: 78% / Above Threshold (75%)") — CG-0007 finished there and the score
+  // was never read because this predicate only knew the "NN/100" report layout.
+  return /\b\d{1,3}(?:\.\d+)?\s*\/\s*100\b/.test(value)
+    || /alignment\s+threshold/i.test(value)
+    || /current\s+alignment\s*:/i.test(value);
 }
 
 function alignmentScoreWithinExpectedRange(score, range) {
@@ -3064,13 +3606,29 @@ async function dismissOnboardingTourModal(page) {
   return dismissTourOverlay(page, 'interview');
 }
 
+// How long a turn waits for the composer to come back after an answer is submitted.
+//
+// Base cap, then a rolling grace period renewed for as long as the page shows any sign of
+// work, bounded by an absolute ceiling so a genuine hang still ends the run. Raised from
+// 10min/3min after a Performance Review - Evaluation run (2026-08-12T16-03-39-058Z, CG-0002)
+// died 903s after its last submit with the composer still on screen and "Saving your answer…"
+// visible: the save was slow, not broken.
+const INTERVIEW_READY_TIMEOUT_MS = 900000;      // 15 min before any sign of work is needed
+const INTERVIEW_PROGRESS_GRACE_MS = 300000;     // keep waiting 5 min past the last sign of work
+const INTERVIEW_READY_MAX_MS = 2700000;         // 45 min absolute ceiling; a true hang still ends
+
 async function waitForInterviewReady(page, config, options = {}) {
   const inputSelector = config.selectors.partnerAi.responseInput;
   const stageName = options.stageName ?? 'Getting Started interview';
-  let deadline = Date.now() + 600000;
+  const startedAt = Date.now();
+  const hardDeadline = startedAt + INTERVIEW_READY_MAX_MS;
+  let deadline = startedAt + INTERVIEW_READY_TIMEOUT_MS;
   let lastVisibleText = '';
   let lastInputState = '';
   let gateSince = null;
+  let extensions = 0;
+  let lastProgressAt = null;
+  let lastProgressSignal = '';
 
   while (Date.now() < deadline) {
     // Cheap per-pass check: close the onboarding tour modal if it appears
@@ -3107,19 +3665,51 @@ async function waitForInterviewReady(page, config, options = {}) {
     // While Common Ground is visibly still processing the previous answer, keep
     // waiting instead of giving up: roll the deadline forward so an active
     // processing screen never trips the timeout, while a true hang still ends.
-    if (isProcessingState(visibleText)) {
-      deadline = Math.max(deadline, Date.now() + 180000);
+    //
+    // Two signals, because the banner is not reliable on its own: "Saving your answer…"
+    // renders intermittently while a slow save runs, so a wait that only watched the text
+    // could stop renewing mid-save. A composer that is on screen but DISABLED is the durable
+    // form of the same state — the app has taken the answer and has not handed the turn back.
+    const composerBusy = !readyInput && await hasDisabledResponseInput(page, inputSelector);
+    const processingText = isProcessingState(visibleText);
+    if (processingText || composerBusy) {
+      const renewed = Math.min(hardDeadline, Math.max(deadline, Date.now() + INTERVIEW_PROGRESS_GRACE_MS));
+      if (renewed > deadline) extensions += 1;
+      deadline = renewed;
+      lastProgressAt = Date.now();
+      lastProgressSignal = processingText ? 'processing text on screen' : 'composer present but disabled';
     }
     await page.waitForTimeout(1500);
   }
 
+  const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
+  const sinceProgress = lastProgressAt ? `${Math.round((Date.now() - lastProgressAt) / 1000)}s ago (${lastProgressSignal})` : 'never observed';
   const compactText = lastVisibleText.replace(/\s+/g, ' ').trim();
   throw new Error([
     'Getting Started interview did not become ready before timeout.',
+    `Waited ${elapsedSeconds}s (base ${Math.round(INTERVIEW_READY_TIMEOUT_MS / 1000)}s, `
+      + `${extensions} grace extension(s) of ${Math.round(INTERVIEW_PROGRESS_GRACE_MS / 1000)}s, `
+      + `ceiling ${Math.round(INTERVIEW_READY_MAX_MS / 1000)}s).`,
+    `Last sign of progress: ${sinceProgress}.`,
     `Response input state: ${lastInputState}`,
+    `Current URL: ${page.url()}`,
     `Last visible page text (start): ${compactText.slice(0, 900)}`,
     `Last visible page text (end): ${compactText.slice(-1400)}`
   ].join('\n'));
+}
+
+// True when the composer is rendered but not accepting input: Common Ground has the previous
+// answer and has not returned the turn yet. Distinct from findReadyResponseInput, which looks
+// for the opposite (a usable input) and returns null both for "disabled" and "not there".
+async function hasDisabledResponseInput(page, selector) {
+  const inputs = page.locator(selector);
+  const count = await inputs.count().catch(() => 0);
+  for (let index = count - 1; index >= 0; index -= 1) {
+    const input = inputs.nth(index);
+    if (!await input.isVisible({ timeout: 100 }).catch(() => false)) continue;
+    if (!await input.isEnabled({ timeout: 100 }).catch(() => false)) return true;
+  }
+  return false;
 }
 
 function interviewReadySignal({ readyInput }) {
