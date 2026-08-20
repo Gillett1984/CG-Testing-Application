@@ -137,6 +137,10 @@ export function loadConfig(args) {
   const personaPlan = personaPin ? null : loadPersonaRotation(rootDir, cli.personaRotationPath ?? runConfig.personaRotationPath);
   const personasEnabled = !cli.personasDisabled && Boolean(personaCatalog) && (Boolean(personaPin) || Boolean(personaPlan));
 
+  // Precedence: CLI flag > scripted file > runConfig > topic default.
+  const alignmentScenarioId = cli.alignmentScenarioId ?? scriptedAnswers?.alignmentScenarioId
+    ?? runConfig.alignmentScenarioId ?? scenarioFoundation?.alignmentScenarios.scenarios[0]?.id ?? '';
+
   return {
     rootDir,
     productionUrl: env.COMMON_GROUND_URL,
@@ -154,7 +158,12 @@ export function loadConfig(args) {
     completionPhrases: env.COMPLETION_PHRASES.split(',').map((phrase) => phrase.trim()).filter(Boolean),
     browser: {
       headless: cli.headed ? false : env.HEADLESS.toLowerCase() !== 'false',
-      slowMo: env.SLOW_MO_MS
+      slowMo: env.SLOW_MO_MS,
+      // TCP-only networking: when UDP 443 is silently dropped (observed after a
+      // reboot with Norton's firewall mid-initialization), Chromium's QUIC and
+      // DNS-over-HTTPS attempts stall every page load to its timeout while
+      // curl/Node fetch work fine. Neither protocol benefits a test harness.
+      args: ['--disable-quic', '--disable-features=DnsOverHttps']
     },
     run: {
       topic: cli.topic ?? runConfig.topic ?? 'Synthetic test topic',
@@ -180,15 +189,21 @@ export function loadConfig(args) {
       qualityCriteriaPath,
       qualityCriteria,
       scenarioFoundation,
-      // Precedence: CLI flag > scripted file > runConfig > topic default.
-      alignmentScenarioId: cli.alignmentScenarioId ?? scriptedAnswers?.alignmentScenarioId ?? runConfig.alignmentScenarioId ?? scenarioFoundation?.alignmentScenarios.scenarios[0]?.id ?? '',
+      alignmentScenarioId,
       behaviorSchedulePath,
       behaviorSchedule,
       scriptedAnswersPath,
       scriptedAnswers,
       scenarioSeed: cli.scenarioSeed ?? runConfig.scenarioSeed ?? '',
       validateConfigOnly: cli.validateConfig,
-      maxTurns: cli.maxTurns ?? runConfig.maxTurns ?? env.MAX_TURNS,
+      // A misaligned scenario is DESIGNED to produce gap-heavy, premise-disputing
+      // answers, so Partner AI legitimately drills deeper than the calibrated
+      // one-turn-per-question baseline (observed: ~11 follow-ups on one impact
+      // topic with an unlucky dossier). Give those runs headroom unless the
+      // ceiling was set explicitly; runaway loops are the loop-guard's job, not
+      // this ceiling's.
+      maxTurns: cli.maxTurns ?? runConfig.maxTurns
+        ?? (/misaligned/i.test(alignmentScenarioId) ? Math.max(env.MAX_TURNS, 30) : env.MAX_TURNS),
       postCompletionWaitMs: scenarioFoundation?.topic.workflow.postProcessingTimeoutMs
         ?? (workflowScope === 'requestor_participant' ? Math.max(env.POST_COMPLETION_WAIT_MS, 420000) : env.POST_COMPLETION_WAIT_MS)
     },

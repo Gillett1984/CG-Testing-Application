@@ -11,11 +11,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const topic = readJson('config/case-types/performance-review-coaching.json');
 const foundation = loadScenarioFoundation(rootDir, topic);
+// off_topic_response ships disabled in the default schedule, so only enabled
+// behaviors are selectable — the count must not include disabled entries.
+const enabledBehaviorCount = foundation.defaultBehaviorSchedule.behaviors
+  .filter((item) => item.enabled !== false).length;
 const allBehaviorSchedule = {
   ...structuredClone(foundation.defaultBehaviorSchedule),
   id: 'all_behaviors_validation',
   name: 'All Behaviors Validation',
-  behaviorCountPerActor: foundation.defaultBehaviorSchedule.behaviors.length
+  behaviorCountPerActor: enabledBehaviorCount
 };
 
 assert.equal(validateCompactResponseStyle('I met the goal. The project finished on time. The team had fewer delays.').pass, true, 'A concise three-sentence response must pass.');
@@ -114,9 +118,13 @@ assert.equal(sharedRoles.size, 1, 'All terms must use one employee role.');
 assert.equal(sharedProjects.size, 1, 'All terms must use one shared project.');
 
 first.setDossiers(dossiersA);
+// Performance topics are manager-initiated (requestorRole defaults to 'manager'),
+// so the participant holds the employee role and the requestor the manager role.
 const dossierContext = first.getScenarioContext('participant', topic.primaryQuestions[0].id);
 assert.equal(dossierContext.canonicalProfile.employeeRole, dossiersA.employee.canonicalProfile.employeeRole, 'Runtime scenario context must use the generated dossier role.');
-assert.ok(dossierContext.dossierAnswer.startsWith('I believe the employee performed poorly'), 'Participant runtime context must retrieve the manager dossier answer.');
+assert.ok(dossierContext.dossierAnswer.startsWith('I believe my work in this area was excellent'), 'Participant runtime context must retrieve the employee dossier answer.');
+const requestorDossierContext = first.getScenarioContext('requestor', topic.primaryQuestions[0].id);
+assert.ok(requestorDossierContext.dossierAnswer.startsWith('I believe the employee performed poorly'), 'Requestor runtime context must retrieve the manager dossier answer.');
 assert.equal(dossierContext.scenarioExpression.primaryQuestionId, topic.primaryQuestions[0].id, 'Runtime context must include the active question relationship.');
 assert.ok(first.getPlan().sharedEvents.every((event) => event.facts.some((fact) => fact.includes(dossiersA.employee.canonicalProfile.employeeRole))), 'Dossier facts must replace the preliminary scenario role in every shared event.');
 
