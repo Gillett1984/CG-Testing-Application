@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { scriptedAnswersSchema } from './scenarioSchemas.js';
+import { domainRoleForActor } from './roleMapping.js';
 
 // Loads and validates a scripted-answers file (see scriptedAnswersSchema).
 // Returns the parsed object, or throws on malformed JSON / schema failure.

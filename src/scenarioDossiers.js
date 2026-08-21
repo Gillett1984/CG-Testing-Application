@@ -4,6 +4,11 @@ export async function generateScenarioDossiers({ llm, topic, scenario, seed, var
   if (!llm?.apiKey) throw new Error('OPENAI_API_KEY is required to generate scenario dossiers.');
   if (typeof completeJson !== 'function') throw new Error('A JSON completion function is required to generate scenario dossiers.');
 
+  // Role diversity is keyed STRICTLY to caseNumber (never store.runId or scenarioSeed):
+  // a deterministic sector per case pushes the LLM off its default roles. Injected ONLY
+  // into the neutral evidence packet (the single origin of canonicalProfile), so both
+  // actor dossiers inherit the identical profile and validateSharedProfile still holds.
+  const roleDiversity = buildRoleDiversity({ caseNumber, persona });
   const topicInput = topicDescription(topic);
   const employeeRatings = ratingAssignments(topic, scenario.ratings.requestor);
   const managerRatings = ratingAssignments(topic, scenario.ratings.participant);
@@ -26,8 +31,9 @@ export async function generateScenarioDossiers({ llm, topic, scenario, seed, var
         'Do not make either viewpoint obviously irrational or unsupported.',
         'Include attribution ambiguity, consistency evidence, and independence evidence so opposite evaluations can remain grounded in identical facts.',
         'Use plain language and spell out abbreviations instead of relying on acronyms.',
-        'Do not mention testing, scenarios, dossiers, prompts, or assigned ratings.'
-      ].join(' '),
+        'Do not mention testing, scenarios, dossiers, prompts, or assigned ratings.',
+        roleDiversity?.directive
+      ].filter(Boolean).join(' '),
       input: {
         caseSeed: seed,
         actor: 'neutral',
@@ -104,6 +110,7 @@ export async function generateScenarioDossiers({ llm, topic, scenario, seed, var
       return {
         schemaVersion: 2,
         caseSeed: seed,
+        roleDomain: roleDiversity?.input.sector ?? null,
         generatedAt: new Date().toISOString(),
         evidencePacket,
         scenarioExpressionPlan,

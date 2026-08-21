@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildBehaviorCompositionPlan, validateCompactResponseStyle, validateScenarioResponse, verifyScenarioBehaviors } from '../src/llmResponder.js';
+import { buildBehaviorCompositionPlan, coverageAllowance, validateCompactResponseStyle, validateScenarioResponse, verifyScenarioBehaviors } from '../src/llmResponder.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,11 +11,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const topic = readJson('config/case-types/performance-review-coaching.json');
 const foundation = loadScenarioFoundation(rootDir, topic);
+// off_topic_response ships disabled in the default schedule, so only enabled
+// behaviors are selectable — the count must not include disabled entries.
+const enabledBehaviorCount = foundation.defaultBehaviorSchedule.behaviors
+  .filter((item) => item.enabled !== false).length;
 const allBehaviorSchedule = {
   ...structuredClone(foundation.defaultBehaviorSchedule),
   id: 'all_behaviors_validation',
   name: 'All Behaviors Validation',
-  behaviorCountPerActor: foundation.defaultBehaviorSchedule.behaviors.length
+  behaviorCountPerActor: enabledBehaviorCount
 };
 
 assert.equal(validateCompactResponseStyle('I met the goal. The project finished on time. The team had fewer delays.').pass, true, 'A concise three-sentence response must pass.');
@@ -25,6 +29,24 @@ assert.equal(validateCompactResponseStyle(Array.from({ length: 76 }, () => 'word
 assert.ok(validateCompactResponseStyle(Array.from({ length: 76 }, () => 'word').join(' ')).warnings.some((warning) => warning.type === 'response_brevity'), 'A response over 75 words must create a brevity warning.');
 assert.equal(validateCompactResponseStyle(`${Array.from({ length: 29 }, () => 'word').join(' ')}.`).pass, true, 'A sentence over 28 words must not hard fail.');
 assert.ok(validateCompactResponseStyle(`${Array.from({ length: 29 }, () => 'word').join(' ')}.`).warnings.some((warning) => warning.type === 'response_reading_level'), 'A long sentence must create a reading-level warning.');
+
+// A full-coverage turn must be allowed one sentence per guidance point: Partner
+// AI scores every point, and a criterion left partial caps the turn at 75 and
+// earns another probe. The compact defaults apply only when no allowance is given.
+const sevenPointAllowance = coverageAllowance({ activePrompt: { answerGuidance: new Array(7).fill('point') } });
+assert.equal(sevenPointAllowance.sentences, 9, 'Seven guidance points must allow a sentence each plus a lead and a close.');
+assert.ok(sevenPointAllowance.words >= 7 * 32, 'The word allowance must scale with the number of guidance points.');
+assert.equal(coverageAllowance({}).sentences, 4, 'With no guidance on screen the allowance must still permit a complete answer.');
+const coverageAnswer = Array.from({ length: 8 }, (_, index) => `Point ${index + 1} was missed against its stated target, so the milestone slipped.`).join(' ');
+assert.equal(
+  validateCompactResponseStyle(coverageAnswer, sevenPointAllowance).warnings.filter((warning) => warning.type === 'response_brevity').length,
+  0,
+  'A coverage answer judged against its own allowance must not raise brevity warnings.'
+);
+assert.ok(
+  validateCompactResponseStyle(coverageAnswer).warnings.some((warning) => warning.type === 'response_brevity'),
+  'The same answer judged against the compact defaults must still warn, so the defaults are unchanged.'
+);
 
 const first = createScenarioController({
   foundation,
@@ -114,9 +136,13 @@ assert.equal(sharedRoles.size, 1, 'All terms must use one employee role.');
 assert.equal(sharedProjects.size, 1, 'All terms must use one shared project.');
 
 first.setDossiers(dossiersA);
+// Performance topics are manager-initiated (requestorRole defaults to 'manager'),
+// so the participant holds the employee role and the requestor the manager role.
 const dossierContext = first.getScenarioContext('participant', topic.primaryQuestions[0].id);
 assert.equal(dossierContext.canonicalProfile.employeeRole, dossiersA.employee.canonicalProfile.employeeRole, 'Runtime scenario context must use the generated dossier role.');
-assert.ok(dossierContext.dossierAnswer.startsWith('I believe the employee performed poorly'), 'Participant runtime context must retrieve the manager dossier answer.');
+assert.ok(dossierContext.dossierAnswer.startsWith('I believe my work in this area was excellent'), 'Participant runtime context must retrieve the employee dossier answer.');
+const requestorDossierContext = first.getScenarioContext('requestor', topic.primaryQuestions[0].id);
+assert.ok(requestorDossierContext.dossierAnswer.startsWith('I believe the employee performed poorly'), 'Requestor runtime context must retrieve the manager dossier answer.');
 assert.equal(dossierContext.scenarioExpression.primaryQuestionId, topic.primaryQuestions[0].id, 'Runtime context must include the active question relationship.');
 assert.ok(first.getPlan().sharedEvents.every((event) => event.facts.some((fact) => fact.includes(dossiersA.employee.canonicalProfile.employeeRole))), 'Dossier facts must replace the preliminary scenario role in every shared event.');
 

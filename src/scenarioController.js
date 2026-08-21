@@ -3,6 +3,7 @@ import {
   behaviorScheduleSchema,
   materializedScenarioPlanSchema
 } from './scenarioSchemas.js';
+import { domainRoleForActor } from './roleMapping.js';
 
 const SOURCE_DEPENDENT_BEHAVIORS = new Set([
   'correction_previous_response',
@@ -116,26 +117,22 @@ export class ScenarioController {
           unit: String(metric.unit ?? 'synthetic performance units')
         }];
       }
-      event.actorInterpretations.requestor = {
-        ratingId: employeePosition.ratingId,
-        stance: employeePosition.conclusion,
-        evidenceEmphasis: employeePosition.supportingFacts,
-        counterEvidence: employeePosition.counterEvidence,
-        counterEvidenceExplanation: employeePosition.counterEvidenceExplanation,
-        attribution: employeePosition.attribution,
-        consistency: employeePosition.consistency,
-        independence: employeePosition.independence
-      };
-      event.actorInterpretations.participant = {
-        ratingId: managerPosition.ratingId,
-        stance: managerPosition.conclusion,
-        evidenceEmphasis: managerPosition.supportingFacts,
-        counterEvidence: managerPosition.counterEvidence,
-        counterEvidenceExplanation: managerPosition.counterEvidenceExplanation,
-        attribution: managerPosition.attribution,
-        consistency: managerPosition.consistency,
-        independence: managerPosition.independence
-      };
+      // Route each actor to the employee/manager position for the domain role they hold
+      // (requestorRole-driven), rather than assuming requestor = employee.
+      const interpretationFrom = (position) => ({
+        ratingId: position.ratingId,
+        stance: position.conclusion,
+        evidenceEmphasis: position.supportingFacts,
+        counterEvidence: position.counterEvidence,
+        counterEvidenceExplanation: position.counterEvidenceExplanation,
+        attribution: position.attribution,
+        consistency: position.consistency,
+        independence: position.independence
+      });
+      const positionForActor = (actor) =>
+        domainRoleForActor(actor, this.requestorRole) === 'employee' ? employeePosition : managerPosition;
+      event.actorInterpretations.requestor = interpretationFrom(positionForActor('requestor'));
+      event.actorInterpretations.participant = interpretationFrom(positionForActor('participant'));
     }
   }
 

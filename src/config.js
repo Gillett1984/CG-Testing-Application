@@ -5,6 +5,8 @@ import dotenv from 'dotenv';
 import { z } from 'zod';
 import { loadBehaviorSchedule, loadScenarioFoundation } from './scenarioConfig.js';
 import { loadScriptedAnswers, validateScriptedAnswersAgainstTopic } from './scriptedAnswers.js';
+import { loadPersonaCatalog, loadPersonaRotation } from './personas.js';
+import { WORKFLOW_PHASES } from './workflowPhases.js';
 
 dotenv.config();
 
@@ -28,7 +30,9 @@ const envSchema = z.object({
 const runConfigSchema = z.object({
   topic: z.string().optional(),
   caseType: z.string().optional(),
-  runMode: z.enum(['requestor_getting_started', 'participant_getting_started', 'full_workflow', 'fact_labeling_smoke']).optional(),
+  requestorRole: z.enum(['employee', 'manager']).optional(),
+  runMode: z.enum(['requestor_getting_started', 'participant_getting_started', 'full_workflow', 'fact_labeling_smoke', 'resume_case']).optional(),
+  resumePhase: z.string().optional(),
   existingCaseId: z.string().optional(),
   factRatingStage: z.enum(['requestor_own', 'participant_rates_requestor', 'participant_own', 'requestor_rates_participant']).optional(),
   workflowScope: z.enum(['requestor', 'participant', 'requestor_participant']).optional(),
@@ -109,13 +113,38 @@ export function loadConfig(args) {
       ? 'participant_getting_started'
       : workflowScopeToRunMode(cli.workflowScope ?? runConfig.workflowScope));
   const runMode = requestedRunMode;
-  const existingCaseId = ['participant_getting_started', 'fact_labeling_smoke'].includes(runMode)
+  const caseIdModes = ['participant_getting_started', 'fact_labeling_smoke', 'resume_case'];
+  const existingCaseId = caseIdModes.includes(runMode)
     ? normalizeCaseId(cli.existingCaseId ?? runConfig.existingCaseId)
     : '';
-  if (['participant_getting_started', 'fact_labeling_smoke'].includes(runMode) && !existingCaseId) {
-    throw new Error(`${runMode === 'fact_labeling_smoke' ? 'Fact Labeling Smoke Test' : 'Participant Getting Started'} mode requires a Common Ground Case ID.`);
+  if (caseIdModes.includes(runMode) && !existingCaseId) {
+    const modeLabel = { fact_labeling_smoke: 'Fact Labeling Smoke Test', resume_case: 'Resume Case' }[runMode] ?? 'Participant Getting Started';
+    throw new Error(`${modeLabel} mode requires a Common Ground Case ID.`);
+  }
+
+  // Resume mode replays the full workflow against an EXISTING case, skipping every phase
+  // before resumePhase. Defaults to the participant interview, the usual restart point
+  // after the requestor side has completed.
+  const resumePhase = runMode === 'resume_case'
+    ? (cli.resumePhase ?? runConfig.resumePhase ?? 'participant_interview')
+    : null;
+  if (resumePhase && !WORKFLOW_PHASES.includes(resumePhase)) {
+    throw new Error(`Unknown --resume-phase "${resumePhase}". Valid phases: ${WORKFLOW_PHASES.join(', ')}.`);
   }
   const workflowScope = runModeToWorkflowScope(runMode);
+  const numberOfCases = cli.count ?? runConfig.numberOfCases ?? 1;
+  // A single case fails fast; a multi-case batch continues past failures by
+  // default so one bad case doesn't abort an unattended run. An explicit
+  // --stop-on-failure / --continue-on-failure flag or runConfig value wins.
+  const stopOnFailure = (cli.stopOnFailure ?? runConfig.stopOnFailure) ?? (numberOfCases <= 1);
+  const personaCatalog = loadPersonaCatalog(rootDir);
+  const personaPin = cli.personaId ?? runConfig.personaId ?? null;
+  const personaPlan = personaPin ? null : loadPersonaRotation(rootDir, cli.personaRotationPath ?? runConfig.personaRotationPath);
+  const personasEnabled = !cli.personasDisabled && Boolean(personaCatalog) && (Boolean(personaPin) || Boolean(personaPlan));
+
+  // Precedence: CLI flag > scripted file > runConfig > topic default.
+  const alignmentScenarioId = cli.alignmentScenarioId ?? scriptedAnswers?.alignmentScenarioId
+    ?? runConfig.alignmentScenarioId ?? scenarioFoundation?.alignmentScenarios.scenarios[0]?.id ?? '';
 
   return {
     rootDir,
@@ -134,11 +163,18 @@ export function loadConfig(args) {
     completionPhrases: env.COMPLETION_PHRASES.split(',').map((phrase) => phrase.trim()).filter(Boolean),
     browser: {
       headless: cli.headed ? false : env.HEADLESS.toLowerCase() !== 'false',
-      slowMo: env.SLOW_MO_MS
+      slowMo: env.SLOW_MO_MS,
+      // TCP-only networking: when UDP 443 is silently dropped (observed after a
+      // reboot with Norton's firewall mid-initialization), Chromium's QUIC and
+      // DNS-over-HTTPS attempts stall every page load to its timeout while
+      // curl/Node fetch work fine. Neither protocol benefits a test harness.
+      args: ['--disable-quic', '--disable-features=DnsOverHttps']
     },
     run: {
       topic: cli.topic ?? runConfig.topic ?? 'Synthetic test topic',
       caseType: cli.caseType ?? runConfig.caseType ?? cli.topic ?? runConfig.topic ?? 'Raise',
+      requestorRole: cli.requestorRole ?? runConfig.requestorRole
+        ?? defaultRequestorRole(cli.caseType ?? runConfig.caseType ?? cli.topic ?? runConfig.topic ?? 'Raise'),
       runMode,
       existingCaseId,
       factRatingStage: cli.factRatingStage ?? runConfig.factRatingStage ?? 'participant_rates_requestor',
@@ -150,20 +186,41 @@ export function loadConfig(args) {
       reuseAuthState: cli.reuseAuthState ?? runConfig.reuseAuthState ?? true,
       testObjective: cli.testObjective ?? runConfig.testObjective ?? 'Complete the Getting Started interview using only synthetic data.',
       testBehaviorPolicy: cli.testBehaviorPolicy ?? runConfig.testBehaviorPolicy ?? 'Answer each Partner AI question according to the high-quality criteria.',
-      numberOfCases: cli.count ?? runConfig.numberOfCases ?? 1,
-      stopOnFailure: cli.stopOnFailure ?? runConfig.stopOnFailure ?? true,
+      numberOfCases,
+      stopOnFailure,
+      resumeRunId: cli.resumeRunId ?? null,
+      resumePhase,
+      personas: {
+        enabled: personasEnabled,
+        catalog: personaCatalog,
+        plan: personaPlan,
+        pinnedId: personaPin
+      },
       qualityCriteriaPath,
       qualityCriteria,
       scenarioFoundation,
-      // Precedence: CLI flag > scripted file > runConfig > topic default.
-      alignmentScenarioId: cli.alignmentScenarioId ?? scriptedAnswers?.alignmentScenarioId ?? runConfig.alignmentScenarioId ?? scenarioFoundation?.alignmentScenarios.scenarios[0]?.id ?? '',
+      alignmentScenarioId,
       behaviorSchedulePath,
       behaviorSchedule,
       scriptedAnswersPath,
       scriptedAnswers,
       scenarioSeed: cli.scenarioSeed ?? runConfig.scenarioSeed ?? '',
       validateConfigOnly: cli.validateConfig,
-      maxTurns: cli.maxTurns ?? runConfig.maxTurns ?? env.MAX_TURNS,
+      // Measured across 14 manager-side interviews, turn count ranges 9-30 and is
+      // NOT predicted by answer length: a misaligned manager disputes the premise,
+      // so how far Partner AI drills depends mostly on how much concrete evidence
+      // the generated dossier gives them to cite. A ceiling at the top of that
+      // observed range fails healthy runs (CG-0068, CG-0099 both stopped at 30),
+      // so it sits well clear of it and the loop guard remains the real protection
+      // against a genuine non-terminating interview.
+      // A misaligned scenario is DESIGNED to produce gap-heavy, premise-disputing
+      // answers, so Partner AI legitimately drills deeper than the calibrated
+      // one-turn-per-question baseline (observed: ~11 follow-ups on one impact
+      // topic with an unlucky dossier). Give those runs headroom unless the
+      // ceiling was set explicitly; runaway loops are the loop-guard's job, not
+      // this ceiling's.
+      maxTurns: cli.maxTurns ?? runConfig.maxTurns
+        ?? (/misaligned/i.test(alignmentScenarioId) ? Math.max(env.MAX_TURNS, 45) : env.MAX_TURNS),
       postCompletionWaitMs: scenarioFoundation?.topic.workflow.postProcessingTimeoutMs
         ?? (workflowScope === 'requestor_participant' ? Math.max(env.POST_COMPLETION_WAIT_MS, 420000) : env.POST_COMPLETION_WAIT_MS)
     },
@@ -188,8 +245,10 @@ function parseArgs(args) {
     if (arg === '--config') parsed.configPath = args[index + 1];
     if (arg === '--topic') parsed.topic = args[index + 1];
     if (arg === '--case-type') parsed.caseType = args[index + 1];
+    if (arg === '--requestor-role') parsed.requestorRole = args[index + 1];
     if (arg === '--run-mode') parsed.runMode = args[index + 1];
     if (arg === '--existing-case-id') parsed.existingCaseId = args[index + 1];
+    if (arg === '--resume-phase') { parsed.resumePhase = args[index + 1]; parsed.runMode = parsed.runMode ?? 'resume_case'; }
     if (arg === '--fact-rating-stage') parsed.factRatingStage = args[index + 1];
     if (arg === '--workflow-scope') parsed.workflowScope = args[index + 1];
     if (arg === '--interview-start-actor') parsed.interviewStartActor = args[index + 1];
@@ -209,6 +268,10 @@ function parseArgs(args) {
     if (arg === '--max-turns') parsed.maxTurns = Number(args[index + 1]);
     if (arg === '--continue-on-failure') parsed.stopOnFailure = false;
     if (arg === '--stop-on-failure') parsed.stopOnFailure = true;
+    if (arg === '--resume') parsed.resumeRunId = args[index + 1];
+    if (arg === '--persona') parsed.personaId = args[index + 1];
+    if (arg === '--persona-rotation') parsed.personaRotationPath = args[index + 1];
+    if (arg === '--no-personas') parsed.personasDisabled = true;
   }
 
   return parsed;
@@ -229,6 +292,7 @@ function workflowScopeToRunMode(workflowScope) {
 }
 
 function runModeToWorkflowScope(runMode) {
+  if (runMode === 'resume_case') return 'requestor_participant';
   if (runMode === 'fact_labeling_smoke') return 'requestor_participant';
   if (runMode === 'participant_getting_started') return 'participant';
   if (runMode === 'full_workflow') return 'requestor_participant';
@@ -258,4 +322,18 @@ function defaultQualityCriteriaPath(caseType) {
   const fileName = `${caseType.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.json`;
   const candidate = path.join('config', 'case-types', fileName);
   return fs.existsSync(path.resolve(rootDir, candidate)) ? candidate : null;
+}
+
+// Per-topic default for which role the requestor holds — not a single global default.
+// Performance Review is manager-initiated (requestor = manager); a Raise Request is
+// employee-initiated in the natural case (requestor = employee, asking their manager).
+// Each is overridable per run (--requestor-role / runConfig.requestorRole) because a Raise
+// can be initiated from either side (e.g. a manager-role account creating one on staging).
+const REQUESTOR_ROLE_BY_CASE_TYPE = [
+  { pattern: /performance|review|coaching|evaluation|90.?day/i, role: 'manager' },
+  { pattern: /raise/i, role: 'employee' }
+];
+function defaultRequestorRole(caseType = '') {
+  const hit = REQUESTOR_ROLE_BY_CASE_TYPE.find((entry) => entry.pattern.test(String(caseType)));
+  return hit ? hit.role : 'manager';
 }

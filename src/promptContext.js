@@ -45,7 +45,12 @@ function matchLast(text, pattern) {
 }
 
 function extractAnswerGuidance(text, latestPartnerTurn = '') {
-  const guidance = matchLast(text, /Answer Guidance:\s*([\s\S]*?)\s*Case ID:/gi)
+  // The guidance block ends at "Case ID:" in the old layout; the staging
+  // redesign dropped that label, so also stop at the first chat timestamp
+  // (e.g. "09:56 AM"), which is where the message stream begins. Without a
+  // matching terminator the block silently extracts as empty and the responder
+  // answers without knowing the question's coverage points.
+  const guidance = matchLast(text, /Answer Guidance:\s*([\s\S]*?)\s*(?:Case ID:|\b\d{1,2}:\d{2}\s*(?:AM|PM)\b)/gi)
     || matchLast(latestPartnerTurn, /Please cover:\s*([\s\S]*)$/gi);
   if (!guidance) return [];
 
@@ -90,6 +95,14 @@ function extractLatestPartnerTurn(text) {
   const latestAfterQualityBlock = extractAfterLastQualityBlock(text);
   if (latestAfterQualityBlock) return latestAfterQualityBlock;
 
+  // No QFI block (e.g. the Raise layout): the latest partner message is the text
+  // after the last chat timestamp. Falling through to the header markers below
+  // would keep the sidebar's "Please cover:" guidance block, whose early index
+  // makes extractLatestFollowUpQuestion discard every real conversational
+  // question that follows it — so the responder answers a stale header question.
+  const latestAfterTimestamp = extractAfterLastTimestamp(text);
+  if (latestAfterTimestamp) return latestAfterTimestamp;
+
   const markers = [
     'Current Discussion Area:',
     'Current Primary Question:',
@@ -120,6 +133,23 @@ function extractAfterLastQualityBlock(text) {
   return candidate;
 }
 
+function extractAfterLastTimestamp(text) {
+  // Chat bubbles are stamped with a standalone clock token (often doubled, e.g.
+  // "14:32 14:32"). The latest partner message begins right after the last one.
+  const timestampPattern = /(?:^|\s)(\d{1,2}:\d{2}\s*(?:AM|PM)?)(?=\s|$)/gi;
+  const matches = [...text.matchAll(timestampPattern)];
+  const lastMatch = matches.at(-1);
+  if (!lastMatch) return '';
+
+  const start = (lastMatch.index ?? 0) + lastMatch[0].length;
+  const candidate = text.slice(start).trim();
+  if (candidate.length < 15 || /^Current (?:Discussion Area|Primary Question):/i.test(candidate)) {
+    return '';
+  }
+
+  return candidate;
+}
+
 function extractLastQuestion(text) {
   const matches = [...text.matchAll(/([^.!?\n][^?\n]{12,700}\?)/g)].map((match) => match[1].trim());
   return matches.filter((question) => !isSyntheticUserQuestion(question)).at(-1)
@@ -131,7 +161,12 @@ function extractPromptStatement(text) {
   const beforeGuidance = cleaned.split(/\bPlease cover:/i)[0]?.trim() ?? '';
   const sentences = [...beforeGuidance.matchAll(/(^|[\n.!?]\s+)([A-Z][^.!?\n]{8,240}\.)/g)]
     .map((match) => match[2].trim())
-    .filter((sentence) => !isChromeOrStatusText(sentence));
+    .filter((sentence) => !isChromeOrStatusText(sentence))
+    // Partner AI answers an example/clarification request in the interviewee's
+    // own voice ("I suggest implementing..."). Such sentences are guidance, not
+    // a prompt to answer — treating one as the active question misleads the
+    // responder and the role-swap judge.
+    .filter((sentence) => !/^I (suggest|recommend)\b/i.test(sentence));
 
   return sentences.at(-1)?.replace(/[.]+$/g, '') ?? '';
 }

@@ -29,9 +29,29 @@ Three layers:
    file, and CLI flags; loads selectors, quality criteria, scenario foundation,
    and behavior schedule.
 2. `createRunStore()` (`src/resultStore.js`) creates `results/<ISO-timestamp>/`.
+   Writes are atomic (temp file + `rename`).
 3. Loops `numberOfCases` times calling `runAutomation(config, caseStore)`
-   (`src/commonGroundAutomation.js` — the engine).
-4. Writes `summary.json` and `run-report.txt`; sets the process exit code.
+   (`src/commonGroundAutomation.js` — the engine). Every case is recorded via
+   `summarizeCase` — including errors thrown before the engine attaches artifacts
+   (preflight, browser launch).
+4. After **each** case, rewrites `summary.json`, `run-report.txt`, and `cases.csv`
+   (flat one-row-per-case rollup for pattern analysis) so an interrupted batch
+   keeps an up-to-date summary; sets the process exit code at the end.
+
+### Batch runs (`numberOfCases > 1`)
+- **Continue-on-failure is the default for batches.** `stopOnFailure` defaults to
+  `numberOfCases <= 1` in `src/config.js` (single case fails fast; a batch runs to
+  the end). Override with `--stop-on-failure` / `--continue-on-failure`, a
+  runConfig `stopOnFailure`, or the UI dropdown (which auto-selects "Continue" when
+  Number of Cases > 1 until you pick a value yourself).
+- **Resume** an interrupted batch with `--resume <runId>` (the `results/<runId>`
+  dir name). It reuses that dir, reads the existing `summary.json`, and skips any
+  case number already recorded (passed *or* failed), running only the rest.
+- `cases.csv` columns: case, caseId, status, alignmentScore,
+  alignmentInExpectedRange, stopReason, behaviorCoverage, scenario,
+  scriptedAnswersFile, error, artifactDir.
+- Note: the scenario controller seed is shared across a batch, so behavior
+  materialization is identical per case (dossier/LLM content still varies).
 
 Run modes (`src/config.js`): `requestor_getting_started`,
 `participant_getting_started`, `full_workflow`, `fact_labeling_smoke`. The main
@@ -47,6 +67,32 @@ path is `full_workflow` (`runFullWorkflow` in `src/commonGroundAutomation.js`):
 5. Wait through post-processing, open the Alignment Report, scrape the score.
 6. Assemble `artifacts` and write `run.json` (in a `finally`).
 
+### Persona / habits layer
+
+An orthogonal persona axis, configurable separately from scenario and scripted
+answers. Two trait axes: `polish` (`professional`|`crude`) and `detail`
+(`detailed`|`sparse`). Catalog `config/personas/catalog.json`; batch rotation
+`config/personas/default-rotation.json` (`round_robin`). Selection lives in
+`src/personas.js` (`selectPersona`) and is keyed **strictly to `caseNumber`** —
+never `store.runId`/`scenarioSeed` — so a batch deterministically cycles personas
+(the shared-seed caveat cannot pin one persona across a batch). Flags: `--persona
+<id>` (pin one for all cases), `--persona-rotation <path>`, `--no-personas`.
+
+- Injected at response time in `src/llmResponder.js`: `personaDirectives` pushes
+  voice/register/detail directives into the generation system prompt; applies to
+  every turn including **scripted-mode LLM follow-ups** (scripted first-answers
+  bypass the LLM, follow-ups do not).
+- **Sparse** is enforced through the follow-up machinery, not just a prompt:
+  `responseTokenBudget` clamps non-follow-up turns (`classifyTurn`
+  `isFollowUpTurn`), so detail can only flow once Partner AI coaxes; a
+  `persona_sparse_leak` soft-assertion (`src/commonGroundAutomation.js`) records
+  any specifics leaked on an initial turn.
+- Recorded per case in `summary.json`/`run.json` (`persona`) and the `persona`
+  column of `cases.csv`.
+- Role diversity (varying the LLM-invented `canonicalProfile`) is a separate,
+  not-yet-implemented dossier-time change; the persona layer varies voice/detail,
+  not the invented role.
+
 ### Scripted-answers mode (alternative response source)
 
 An opt-in layer (not a separate run mode) that supplies the **first response to
@@ -61,16 +107,24 @@ with any `workflowScope`. Mechanics:
   cross-party fact labels and the record-only expected range — e.g. an aligned
   file sets `well_aligned_outstanding` so cross-facts label "Confident Fact"
   instead of "Opinion". Precedence: `--alignment-scenario` CLI flag > scripted
-  file > runConfig > topic default; a runConfig override logs a warning. In the
-  live app the
-  invited participant is the Employee (first-person self-evaluation) and the
-  requestor who created the case is the Manager (third-person), so `employee` is
-  used for the **participant** and `manager` for the **requestor** (see
-  `src/scriptedAnswers.js`, schema in `src/scenarioSchemas.js`). The LLM follow-up
-  perspective is flipped to match in scripted mode (`resolveActorPerspective` in
-  `src/llmResponder.js`), and scripted follow-ups are grounded in the transcript
-  rather than the scenario dossier so the interviewee's role stays consistent. The
-  example file documents the shape.
+  file > runConfig > topic default; a runConfig override logs a warning.
+
+  **Actor ↔ domain-role mapping is per-topic, not a fixed assumption.** Which actor
+  is the Employee (first-person self-assessment) vs. the Manager (third-person
+  evaluation) depends on `config.run.requestorRole`, resolved in `src/config.js`:
+  Performance Review is manager-initiated (**requestor = manager**), while a Raise is
+  employee-initiated (**requestor = employee**). Override per run with
+  `--requestor-role <employee|manager>` or runConfig `requestorRole`, since a Raise can
+  be created from either side (e.g. a manager-role account on staging created one where
+  the requestor was assigned Manager). Scripted files stay keyed by `employee`/`manager`
+  (invariant to who the requestor is); the actor→key routing is centralized in
+  `src/roleMapping.js` (`domainRoleForActor`) and used identically by
+  `resolveActorPerspective` (`src/llmResponder.js`), `pickScriptedAnswer`
+  (`src/scriptedAnswers.js`), and the actor→dossier mapping in `src/scenarioController.js`.
+  (This replaces the pre-2026-08 assumption that the requestor was always the Employee;
+  Common Ground re-architected Performance Review to be created from the manager side.)
+  Scripted follow-ups are grounded in the transcript rather than the scenario dossier so
+  the interviewee's role stays consistent. The example file documents the shape.
 - The live Common Ground prompt is matched to a `primaryQuestionId` with the same
   fuzzy matcher used for scenario turns (`src/questionMatching.js`,
   `matchScenarioQuestionScored`). Manager questions mirror the employee questions,

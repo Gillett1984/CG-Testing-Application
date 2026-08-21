@@ -78,6 +78,10 @@
             <input id="numberOfCases" type="number" min="1" step="1" value="1">
           </label>
           <label>
+            <span>Persona</span>
+            <input id="personaMode" type="text" value="—" disabled readonly title="Personas rotate automatically per case; not user-selectable">
+          </label>
+          <label>
             <span>Max Conversation Turns</span>
             <input id="maxTurns" type="number" min="1" step="1" value="50">
           </label>
@@ -133,6 +137,7 @@
             <span>Scripted Answers File</span>
             <select id="scriptedAnswersPath"></select>
           </label>
+          <div id="scriptedScenarioNotice" class="notice warning" hidden></div>
         </div>
 
         <div id="topicUnsupported" class="notice error" hidden></div>
@@ -160,7 +165,7 @@
         <div class="panel-heading">
           <div>
             <h2>Behavior Schedule</h2>
-            <p>Enabled behaviors form the candidate pool. The seeded controller selects the requested count for both parties.</p>
+            <p>Enabled behaviors form the candidate pool. The seeded controller selects the requested number of behaviors per party; each behavior expands into one or more stages, so the stage total is higher than the behavior count.</p>
           </div>
           <button id="resetSchedule" type="button">Reset</button>
         </div>
@@ -170,12 +175,8 @@
             <input id="behaviorCount" type="number" min="1" step="1" value="6">
           </label>
           <div class="schedule-stat">
-            <span>Eligible</span>
-            <strong id="eligibleBehaviorCount">0</strong>
-          </div>
-          <div class="schedule-stat">
-            <span>Candidate stages</span>
-            <strong id="questionPlacementCount">0</strong>
+            <span>Eligible pool</span>
+            <strong id="eligiblePoolSummary">0 behaviors / 0 stages</strong>
           </div>
         </div>
         <div id="compatibilityWarnings" class="notice warning" hidden></div>
@@ -213,6 +214,7 @@
           <div><span>Behavior coverage</span><strong id="coverageTotal">-</strong></div>
           <div><span>Soft failures</span><strong id="softFailureTotal">-</strong></div>
           <div><span>Alignment score</span><strong id="alignmentScore">-</strong></div>
+          <div><span>Persona</span><strong id="personaStatus">-</strong></div>
         </div>
       </section>
 

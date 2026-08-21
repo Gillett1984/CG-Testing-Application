@@ -26,7 +26,7 @@ const context = {
   qualityCriteria: config.run.qualityCriteria,
   activeManeuver: null,
   scenarioTurn: null, // scripted-mode follow-up: no dossier persona
-  scriptedMode: true, // participant = employee (first person)
+  scriptedMode: true, // participant = manager (third person)
   latestPrompt: followupPrompt,
   transcript,
   turn: 2,

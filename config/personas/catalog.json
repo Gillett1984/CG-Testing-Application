@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "personas": [
+    {
+      "id": "polished_detailed",
+      "name": "Polished / Detailed",
+      "polish": "professional",
+      "detail": "detailed",
+      "voice": "Measured, articulate, well-organized; sounds like a conscientious professional.",
+      "writingHabits": ["Use complete sentences and correct grammar.", "Offer concrete specifics and examples without being asked."]
+    },
+    {
+      "id": "crude_sparse",
+      "name": "Crude / Sparse",
+      "polish": "crude",
+      "detail": "sparse",
+      "voice": "Blunt, informal, low-effort; answers grudgingly and briefly.",
+      "writingHabits": ["Casual grammar, fragments and run-ons are fine.", "Do not volunteer anything beyond the bare minimum."]
+    },
+    {
+      "id": "polished_sparse",
+      "name": "Polished / Sparse",
+      "polish": "professional",
+      "detail": "sparse",
+      "voice": "Professional but terse; correct and polite, yet gives little until pressed.",
+      "writingHabits": ["Clean grammar, short replies.", "Hold back specifics until asked."]
+    },
+    {
+      "id": "crude_detailed",
+      "name": "Crude / Detailed",
+      "polish": "crude",
+      "detail": "detailed",
+      "voice": "Rambling and unpolished but forthcoming; over-shares in rough language.",
+      "writingHabits": ["Informal, messy phrasing.", "Volunteer lots of concrete detail and tangents."]
+    }
+  ]
+}

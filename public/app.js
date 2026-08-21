@@ -8,6 +8,7 @@ const fields = {
   interviewStartActor: document.querySelector('#interviewStartActor'),
   alignmentScenario: document.querySelector('#alignmentScenario'),
   numberOfCases: document.querySelector('#numberOfCases'),
+  personaMode: document.querySelector('#personaMode'),
   maxTurns: document.querySelector('#maxTurns'),
   scenarioSeed: document.querySelector('#scenarioSeed'),
   dossierMode: document.querySelector('#dossierMode'),
@@ -35,12 +36,12 @@ const elements = {
   startRun: document.querySelector('#startRun'),
   stopRun: document.querySelector('#stopRun'),
   topicUnsupported: document.querySelector('#topicUnsupported'),
+  scriptedScenarioNotice: document.querySelector('#scriptedScenarioNotice'),
   scenarioDescription: document.querySelector('#scenarioDescription'),
   alignmentRange: document.querySelector('#alignmentRange'),
   scenarioRatings: document.querySelector('#scenarioRatings'),
   resetSchedule: document.querySelector('#resetSchedule'),
-  eligibleBehaviorCount: document.querySelector('#eligibleBehaviorCount'),
-  questionPlacementCount: document.querySelector('#questionPlacementCount'),
+  eligiblePoolSummary: document.querySelector('#eligiblePoolSummary'),
   compatibilityWarnings: document.querySelector('#compatibilityWarnings'),
   behaviorEditor: document.querySelector('#behaviorEditor'),
   topicDefinitionSummary: document.querySelector('#topicDefinitionSummary'),
@@ -52,6 +53,7 @@ const elements = {
   coverageTotal: document.querySelector('#coverageTotal'),
   softFailureTotal: document.querySelector('#softFailureTotal'),
   alignmentScore: document.querySelector('#alignmentScore'),
+  personaStatus: document.querySelector('#personaStatus'),
   behaviorTimeline: document.querySelector('#behaviorTimeline'),
   scenarioExpressions: document.querySelector('#scenarioExpressions'),
   softAssertions: document.querySelector('#softAssertions'),
@@ -82,6 +84,15 @@ let viewingHistory = false;
 let caseTypes = [];
 let qualityCriteria = null;
 let scenarioData = null;
+let scriptedAnswerFiles = [];
+let stopOnFailureTouched = false;
+
+// Mirror the CLI batch default: a single case stops on failure, a multi-case
+// batch continues, unless the user has explicitly picked a value themselves.
+function syncStopOnFailureDefault() {
+  if (stopOnFailureTouched) return;
+  fields.stopOnFailure.value = Number(fields.numberOfCases.value) > 1 ? 'false' : 'true';
+}
 let behaviorSchedule = null;
 let topicDrafts = [];
 let activeTopicDraft = null;
@@ -92,6 +103,8 @@ fields.runMode.addEventListener('change', updateModeFields);
 fields.caseType.addEventListener('change', () => loadTopic(fields.caseType.value));
 fields.alignmentScenario.addEventListener('change', renderScenarioPreview);
 fields.behaviorCount.addEventListener('input', updateScheduleSummary);
+fields.numberOfCases.addEventListener('input', syncStopOnFailureDefault);
+fields.stopOnFailure.addEventListener('change', () => { stopOnFailureTouched = true; });
 elements.resetSchedule.addEventListener('click', () => {
   if (!scenarioData?.defaultBehaviorSchedule) return;
   behaviorSchedule = structuredClone(scenarioData.defaultBehaviorSchedule);
@@ -125,6 +138,7 @@ elements.stopRun.addEventListener('click', async () => {
 });
 
 fields.scriptedEnabled.addEventListener('change', updateScriptedAnswersField);
+fields.scriptedAnswersPath.addEventListener('change', applyScriptedScenario);
 
 elements.showRunner.addEventListener('click', () => showWorkspace('runner'));
 elements.showTopicSetup.addEventListener('click', () => showWorkspace('topic'));
@@ -150,6 +164,9 @@ async function boot() {
   fields.maxTurns.value = defaults.runConfig.maxTurns ?? 50;
   fields.testObjective.value = defaults.runConfig.testObjective ?? '';
   fields.stopOnFailure.value = String(defaults.runConfig.stopOnFailure ?? true);
+  syncStopOnFailureDefault();
+  fields.personaMode.value = personaModeLabel(defaults.personas);
+  fields.personaMode.title = (defaults.personas?.personas ?? []).map((p) => p.id).join(', ') || 'No personas configured';
   fields.scenarioSeed.value = defaults.runConfig.scenarioSeed ?? '';
   fields.interviewStartActor.value = defaults.runConfig.interviewStartActor ?? 'employee';
   fields.dossierMode.value = defaults.runConfig.dossierMode ?? 'fresh';
@@ -176,6 +193,7 @@ async function loadScriptedAnswerFiles() {
   } catch {
     files = [];
   }
+  scriptedAnswerFiles = files;
   fields.scriptedAnswersPath.innerHTML = files.length
     ? files.map((file) => `<option value="${file.path}">${file.name}</option>`).join('')
     : '<option value="">No files in config/scripted-answers</option>';
@@ -186,7 +204,43 @@ async function loadScriptedAnswerFiles() {
 }
 
 function updateScriptedAnswersField() {
-  fields.scriptedAnswersField.hidden = !fields.scriptedEnabled.checked;
+  const enabled = fields.scriptedEnabled.checked;
+  fields.scriptedAnswersField.hidden = !enabled;
+  if (enabled) {
+    applyScriptedScenario();
+  } else {
+    elements.scriptedScenarioNotice.hidden = true;
+  }
+}
+
+// Keep the Named Scenario field in sync with the selected scripted-answer file.
+// The file's embedded alignmentScenarioId already wins at runtime (src/config.js),
+// so mirroring it here prevents a misleading/stale scenario in the UI. Files with
+// no embedded id, or an id not valid for the current case type, leave the field
+// untouched and surface a visible warning instead of guessing.
+function applyScriptedScenario() {
+  const notice = elements.scriptedScenarioNotice;
+  const hideNotice = () => { notice.hidden = true; notice.textContent = ''; };
+  if (!fields.scriptedEnabled.checked) { hideNotice(); return; }
+  const file = scriptedAnswerFiles.find((item) => item.path === fields.scriptedAnswersPath.value);
+  if (!file) { hideNotice(); return; }
+  const scenarioId = file.alignmentScenarioId;
+  if (!scenarioId) {
+    notice.textContent = `"${file.name}" has no embedded scenario (alignmentScenarioId). Named Scenario left unchanged — set it manually to match this file.`;
+    notice.hidden = false;
+    return;
+  }
+  const known = [...fields.alignmentScenario.options].some((option) => option.value === scenarioId);
+  if (!known) {
+    notice.textContent = `"${file.name}" targets scenario "${scenarioId}", which is not available for the current case type. Named Scenario left unchanged.`;
+    notice.hidden = false;
+    return;
+  }
+  if (fields.alignmentScenario.value !== scenarioId) {
+    fields.alignmentScenario.value = scenarioId;
+    renderScenarioPreview();
+  }
+  hideNotice();
 }
 
 async function loadTopic(caseType) {
@@ -195,6 +249,10 @@ async function loadTopic(caseType) {
     api(`/api/scenario-data?caseType=${encodeURIComponent(caseType)}`)
   ]);
   await applyScenarioData(scenarioResult, criteriaResult.qualityCriteria);
+  // Repopulating scenarios for the new case type resets the Named Scenario
+  // field; re-sync it to the active scripted file so a case-type change cannot
+  // drift the two out of alignment.
+  applyScriptedScenario();
 }
 
 async function applyScenarioData(data, criteria, selectedScenarioId = '') {
@@ -343,11 +401,12 @@ function updateScheduleSummary() {
   if (!behaviorSchedule || !scenarioData) return;
   behaviorSchedule.behaviorCountPerActor = Math.max(1, Number(fields.behaviorCount.value) || 1);
   const enabled = behaviorSchedule.behaviors.filter((item) => item.enabled);
-  elements.eligibleBehaviorCount.textContent = enabled.length;
-  elements.questionPlacementCount.textContent = enabled.reduce((count, item) => {
+  const stageCount = enabled.reduce((count, item) => {
     const definition = scenarioData.behaviorCatalog.behaviors.find((candidate) => candidate.id === item.behaviorId);
     return count + (definition?.stages.length ?? 1);
   }, 0);
+  elements.eligiblePoolSummary.textContent =
+    `${enabled.length} behavior${enabled.length === 1 ? '' : 's'} / ${stageCount} stage${stageCount === 1 ? '' : 's'}`;
 
   const warnings = compatibilityWarnings();
   if (enabled.length < behaviorSchedule.behaviorCountPerActor) warnings.unshift(`Enable at least ${behaviorSchedule.behaviorCountPerActor} behaviors; only ${enabled.length} are currently eligible.`);
@@ -504,6 +563,7 @@ async function updateStatus() {
     ? `Case 1: ${summaryCase.status}${summaryCase.stopReason ? ` - ${summaryCase.stopReason}` : ''}`
     : status === 'running' ? 'Run in progress.' : 'No completed run summary.';
   renderArtifactView(artifactCase);
+  renderPersonaStatus(run.currentPersona, run.artifactView?.cases);
 
   const running = status === 'running' || status === 'stopping';
   elements.startRun.disabled = running || !scenarioData?.supported;
@@ -561,6 +621,7 @@ async function viewHistoricalRun(id) {
   elements.caseId.textContent = artifactCase?.caseId ?? summaryCase?.caseId ?? '-';
   elements.runSummary.textContent = `Viewing saved run ${detail.id}${summaryCase ? ` — Case 1: ${summaryCase.status}` : ''}`;
   renderArtifactView(artifactCase);
+  renderPersonaStatus(null, detail.artifactView?.cases);
 
   // Live controls stay inert while viewing history.
   elements.stopRun.disabled = true;
@@ -571,6 +632,29 @@ function returnToLiveView() {
   viewingHistory = false;
   elements.runHistory.value = '';
   startPolling();
+}
+
+// Read-only persona mode label for Run Setup. Count comes from the server catalog,
+// so adding a persona to config/personas/catalog.json needs no UI change.
+function personaModeLabel(personas) {
+  if (!personas || personas.mode === 'off' || !personas.personaCount) return 'Off';
+  if (personas.mode === 'pinned') return `Pinned — ${personas.pinnedId ?? '?'}`;
+  const n = personas.personaIds?.length || personas.personaCount;
+  return `Rotation — ${n} persona${n === 1 ? '' : 's'}`;
+}
+
+// Show the persona of the current/last case (display-only). Prefer the live
+// in-flight persona from /api/run; fall back to the last case's flushed run.json.
+function renderPersonaStatus(currentPersona, cases) {
+  const source = currentPersona?.id
+    ? currentPersona
+    : (cases ?? [])[(cases ?? []).length - 1]?.persona ?? null;
+  const caseNumber = currentPersona?.id
+    ? currentPersona.caseNumber
+    : (cases ?? [])[(cases ?? []).length - 1]?.caseNumber;
+  elements.personaStatus.textContent = source?.id
+    ? `Case ${caseNumber ?? '?'} persona: ${source.id} (${source.polish}/${source.detail})`
+    : '—';
 }
 
 function renderArtifactView(artifact) {

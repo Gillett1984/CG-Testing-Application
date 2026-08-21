@@ -1,5 +1,27 @@
 import { z } from 'zod';
 
+export const personaSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  polish: z.enum(['professional', 'crude']),
+  detail: z.enum(['detailed', 'sparse']),
+  voice: z.string().min(1),
+  writingHabits: z.array(z.string()).default([]),
+  description: z.string().optional()
+});
+
+export const personaCatalogSchema = z.object({
+  schemaVersion: z.literal(1),
+  personas: z.array(personaSchema).min(1)
+});
+
+export const personaRotationSchema = z.object({
+  schemaVersion: z.literal(1),
+  id: z.string().min(1),
+  strategy: z.enum(['round_robin']).default('round_robin'),
+  personaIds: z.array(z.string().min(1)).min(1)
+});
+
 export const ratingLevelSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),

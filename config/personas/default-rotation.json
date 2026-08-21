@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "id": "default-rotation",
+  "strategy": "round_robin",
+  "personaIds": ["polished_detailed", "crude_sparse", "polished_sparse", "crude_detailed"]
+}

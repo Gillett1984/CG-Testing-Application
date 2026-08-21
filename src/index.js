@@ -1,6 +1,7 @@
 import { loadConfig } from './config.js';
 import { runAutomation } from './commonGroundAutomation.js';
 import { createRunStore } from './resultStore.js';
+import { selectPersona } from './personas.js';
 
 async function main() {
   const config = loadConfig(process.argv.slice(2));
@@ -12,7 +13,8 @@ async function main() {
     return;
   }
 
-  const store = await createRunStore(config.rootDir);
+  const resumeRunId = config.run.resumeRunId;
+  const store = await createRunStore(config.rootDir, resumeRunId ? { runId: resumeRunId } : {});
   console.log(`Starting Common Ground automation run ${store.runId}`);
   console.log(`Run mode: ${formatRunMode(config.run.runMode)}`);
   if (config.run.runMode === 'full_workflow') {
@@ -50,67 +52,39 @@ async function main() {
   };
 
   for (let caseNumber = 1; caseNumber <= config.run.numberOfCases; caseNumber += 1) {
+    if (completedCaseNumbers.has(caseNumber)) {
+      console.log(`Skipping case ${caseNumber} (already recorded in resumed run).`);
+      continue;
+    }
     const caseStore = config.run.numberOfCases === 1 ? store : store.caseStore(caseNumber);
+    // Persona rotation is keyed to caseNumber only — never store.runId/scenarioSeed.
+    const persona = selectPersona({ ...config.run.personas, caseNumber });
 
+    let caseRow;
     try {
       console.log(`Starting case ${caseNumber} of ${config.run.numberOfCases}`);
-      const result = await runAutomation(config, caseStore);
-      summary.cases.push({
-        caseNumber,
-        status: result.status,
-        caseId: result.case?.commonGroundId ?? result.case?.id ?? null,
-        syntheticReference: result.case?.syntheticReference ?? null,
-        manualNextStep: result.manualNextStep,
-        completedGettingStarted: result.completedGettingStarted,
-        workflowCompleted: result.workflowCompleted,
-        statusBasis: result.statusBasis,
-        requestorGettingStartedCompleted: result.requestorGettingStarted?.completed,
-        participantGettingStartedCompleted: result.participantGettingStarted?.completed,
-        syntheticUserScenarioCompliant: result.syntheticUserScenarioCompliant,
-        behaviorCoverage: result.behaviorCoverage,
-        scriptedAnswerCoverage: summarizeScriptedAnswers(result),
-        softAssertionFailures: result.softAssertions?.filter((item) => !item.passed).length ?? 0,
-        alignmentScore: result.alignmentReport?.score,
-        alignmentWithinExpectedRange: result.alignmentReport?.withinExpectedRange,
-        stages: result.stages,
-        stopReason: result.stopReason,
-        policyStopTriggered: result.policyStopTriggered,
-        artifactDir: caseStore.runDir
-      });
+      if (persona) console.log(`Case ${caseNumber} persona: ${persona.id} (${persona.polish}/${persona.detail})`);
+      const result = await runAutomation(config, caseStore, { persona, caseNumber });
+      caseRow = summarizeCase({ caseNumber, artifacts: result, artifactDir: caseStore.runDir, config });
       console.log(`Case ${caseNumber} finished with status: ${result.status}`);
-
-      if (result.status !== 'passed' && config.run.stopOnFailure) {
-        break;
-      }
     } catch (error) {
-      if (error.artifacts) {
-        summary.cases.push({
-          caseNumber,
-          status: 'failed',
-          caseId: error.artifacts.case?.commonGroundId ?? error.artifacts.case?.id ?? null,
-          syntheticReference: error.artifacts.case?.syntheticReference ?? null,
-          manualNextStep: error.artifacts.manualNextStep,
-          error: error.message,
-          stopReason: error.artifacts.stopReason,
-          artifactDir: caseStore.runDir
-        });
-      }
+      // Record every case, including errors thrown before runAutomation's own
+      // try/catch attaches artifacts (preflight, browser launch) — R3.
+      caseRow = summarizeCase({ caseNumber, artifacts: error.artifacts ?? null, artifactDir: caseStore.runDir, errorMessage: error.message, config });
       console.error(error.message);
+    }
 
-      if (config.run.stopOnFailure) {
-        break;
-      }
+    summary.cases.push(caseRow);
+    completedCaseNumbers.add(caseNumber);
+    await persistSummary();
+
+    if (caseRow.status !== 'passed' && config.run.stopOnFailure) {
+      console.log(`Stopping batch after case ${caseNumber} (stopOnFailure enabled).`);
+      break;
     }
   }
 
-  summary.finishedAt = new Date().toISOString();
-  summary.status = summary.cases.length === config.run.numberOfCases
-    && summary.cases.every((result) => result.status === 'passed')
-    ? 'passed'
-    : 'failed';
-
-  await store.writeJson('summary.json', summary);
-  await store.writeText('run-report.txt', buildRunReport(config, summary));
+  await persistSummary({ final: true });
   console.log(`Run finished with status: ${summary.status}`);
   console.log(`Artifacts: ${store.runDir}`);
   process.exitCode = summary.status === 'passed' ? 0 : 1;
@@ -166,6 +140,11 @@ function buildRunReport(config, summary) {
       `  Requestor Getting Started: ${item.requestorGettingStartedCompleted ?? false}`,
       `  Participant Getting Started: ${item.participantGettingStartedCompleted ?? false}`,
       `  Synthetic User Scenario Compliant: ${item.syntheticUserScenarioCompliant ?? false}`,
+      `  Behavior Coverage: ${item.behaviorCoverage?.behaviorsInjected === false
+        ? 'N/A (scripted run — behaviors not injected)'
+        : item.behaviorCoverage?.byActor
+        ? `Employee ${item.behaviorCoverage.byActor.requestor.completedBehaviors}/${item.behaviorCoverage.byActor.requestor.assignedBehaviors}, Manager ${item.behaviorCoverage.byActor.participant.completedBehaviors}/${item.behaviorCoverage.byActor.participant.assignedBehaviors}`
+        : 'not recorded'}`,
       `  Scripted Answers Used: ${item.scriptedAnswerCoverage
         ? `${item.scriptedAnswerCoverage.scriptedTurns} turns (${item.scriptedAnswerCoverage.sequentialFallbacks} sequential fallback), ${item.scriptedAnswerCoverage.llmTurns} LLM follow-ups`
         : 'n/a'}`,
@@ -200,6 +179,79 @@ function summarizeScriptedAnswers(result) {
     sequentialFallbacks: scripted.filter((entry) => entry.scriptedAnswer?.matchConfidence === 'sequential-fallback').length,
     questionsAnswered: [...new Set(scripted.map((entry) => entry.scriptedAnswer?.primaryQuestionId).filter(Boolean))]
   };
+}
+
+// Single source of truth for a case's summary row, used by both the success and
+// failure paths so failure rows carry the same fields (R3). `artifacts` is null
+// when the case died before producing any (e.g. preflight failure).
+function summarizeCase({ caseNumber, artifacts, artifactDir, errorMessage = null, config }) {
+  return {
+    caseNumber,
+    status: artifacts?.status ?? 'failed',
+    caseId: artifacts?.case?.commonGroundId ?? artifacts?.case?.id ?? null,
+    syntheticReference: artifacts?.case?.syntheticReference ?? null,
+    manualNextStep: artifacts?.manualNextStep ?? null,
+    completedGettingStarted: artifacts?.completedGettingStarted ?? null,
+    workflowCompleted: artifacts?.workflowCompleted ?? null,
+    statusBasis: artifacts?.statusBasis ?? null,
+    requestorGettingStartedCompleted: artifacts?.requestorGettingStarted?.completed ?? null,
+    participantGettingStartedCompleted: artifacts?.participantGettingStarted?.completed ?? null,
+    syntheticUserScenarioCompliant: artifacts?.syntheticUserScenarioCompliant ?? null,
+    behaviorCoverage: artifacts?.behaviorCoverage ?? null,
+    scriptedAnswerCoverage: artifacts ? summarizeScriptedAnswers(artifacts) : null,
+    softAssertionFailures: artifacts?.softAssertions?.filter((item) => !item.passed).length ?? 0,
+    alignmentScore: artifacts?.alignmentReport?.score ?? null,
+    alignmentWithinExpectedRange: artifacts?.alignmentReport?.withinExpectedRange ?? null,
+    stages: artifacts?.stages ?? null,
+    stopReason: artifacts?.stopReason ?? errorMessage ?? null,
+    policyStopTriggered: artifacts?.policyStopTriggered ?? null,
+    alignmentScenarioId: artifacts?.alignmentScenarioId ?? config.run.alignmentScenarioId ?? null,
+    personaId: artifacts?.persona?.id ?? null,
+    scriptedAnswersPath: config.run.scriptedAnswersPath ?? null,
+    error: errorMessage,
+    artifactDir
+  };
+}
+
+// Flat one-row-per-case rollup for pattern analysis across a batch (R4).
+function buildCasesCsv(summary) {
+  const header = [
+    'case', 'caseId', 'status', 'alignmentScore', 'alignmentInExpectedRange',
+    'stopReason', 'behaviorCoverage', 'scenario', 'persona', 'scriptedAnswersFile', 'error', 'artifactDir'
+  ];
+  const rows = summary.cases
+    .slice()
+    .sort((a, b) => a.caseNumber - b.caseNumber)
+    .map((item) => [
+      item.caseNumber,
+      item.caseId ?? '',
+      item.status ?? '',
+      item.alignmentScore ?? '',
+      item.alignmentWithinExpectedRange ?? '',
+      item.stopReason ?? '',
+      behaviorCoverageCell(item.behaviorCoverage),
+      item.alignmentScenarioId ?? '',
+      item.personaId ?? '',
+      item.scriptedAnswersPath ?? '',
+      item.error ?? '',
+      item.artifactDir ?? ''
+    ].map(csvCell).join(','));
+  return `${[header.join(','), ...rows].join('\n')}\n`;
+}
+
+function behaviorCoverageCell(coverage) {
+  if (!coverage) return '';
+  if (coverage.behaviorsInjected === false) return 'N/A (scripted)';
+  const byActor = coverage.byActor ?? {};
+  const fmt = (actor) => byActor[actor]
+    ? `${byActor[actor].completedBehaviors}/${byActor[actor].assignedBehaviors}`
+    : '-';
+  return `requestor ${fmt('requestor')}; participant ${fmt('participant')}`;
+}
+
+function csvCell(value) {
+  const text = value === null || value === undefined ? '' : String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
 function formatRunMode(runMode) {

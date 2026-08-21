@@ -8,6 +8,7 @@ import dotenv from 'dotenv';
 import { resolveCaEnv, describeCaEnv } from './localCaEnv.js';
 import { behaviorScheduleSchema, validateBehaviorCompatibility } from '../src/scenarioSchemas.js';
 import { loadScenarioFoundation } from '../src/scenarioConfig.js';
+import { loadPersonaCatalog, loadPersonaRotation } from '../src/personas.js';
 import {
   approveAndPublishTopicDraft,
   generateTopicDraft,
@@ -111,7 +112,24 @@ async function loadDefaults() {
     caseTypes: await listCaseTypes(),
     hasOpenAiKey: Boolean(process.env.OPENAI_API_KEY),
     productionUrl: process.env.COMMON_GROUND_URL ?? null,
+    personas: describePersonas(),
     uiBuild
+  };
+}
+
+// Read-only persona summary for the UI. UI-launched runs never pass --persona/
+// --no-personas, so the effective mode is the default rotation whenever a catalog
+// and rotation file exist. Sourced from config/personas/* so adding a persona
+// there needs no UI edit.
+function describePersonas() {
+  const catalog = loadPersonaCatalog(rootDir);
+  if (!catalog) return { mode: 'off', personaCount: 0, personaIds: [], personas: [] };
+  const rotation = loadPersonaRotation(rootDir);
+  return {
+    mode: rotation ? 'rotation' : 'off',
+    personaCount: catalog.personas.length,
+    personaIds: rotation?.personaIds ?? [],
+    personas: catalog.personas.map((p) => ({ id: p.id, name: p.name, polish: p.polish, detail: p.detail }))
   };
 }
 
@@ -134,13 +152,27 @@ async function listScriptedAnswerFiles() {
   const dir = path.join(rootDir, 'config', 'scripted-answers');
   if (!fsSync.existsSync(dir)) return [];
   const entries = await fs.readdir(dir, { withFileTypes: true });
-  return entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
-    .map((entry) => ({
+  const files = entries.filter((entry) => entry.isFile() && entry.name.endsWith('.json'));
+  const enriched = [];
+  for (const entry of files) {
+    // Surface the embedded alignmentScenarioId so the UI can keep the Named
+    // Scenario field in sync with the selected file. A malformed file stays
+    // selectable with a null id (the UI warns and leaves the field untouched).
+    let alignmentScenarioId = null;
+    let topicId = null;
+    try {
+      const parsed = JSON.parse(await fs.readFile(path.join(dir, entry.name), 'utf8'));
+      if (typeof parsed.alignmentScenarioId === 'string') alignmentScenarioId = parsed.alignmentScenarioId;
+      if (typeof parsed.topicId === 'string') topicId = parsed.topicId;
+    } catch { /* leave nulls */ }
+    enriched.push({
       name: entry.name,
-      path: path.posix.join('config', 'scripted-answers', entry.name)
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+      path: path.posix.join('config', 'scripted-answers', entry.name),
+      alignmentScenarioId,
+      topicId
+    });
+  }
+  return enriched.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // Validates a UI-supplied scripted-answers path: must resolve inside
@@ -481,19 +513,23 @@ async function loadPastRunDetail(rawId) {
 }
 
 async function loadArtifactView(artifactDir) {
-  const candidates = [path.join(artifactDir, 'run.json')];
+  const candidates = [{ file: path.join(artifactDir, 'run.json'), caseNumber: 1 }];
   if (fsSync.existsSync(artifactDir)) {
     const entries = await fs.readdir(artifactDir, { withFileTypes: true });
     for (const entry of entries) {
-      if (entry.isDirectory() && /^case-\d+$/i.test(entry.name)) candidates.push(path.join(artifactDir, entry.name, 'run.json'));
+      const match = /^case-(\d+)$/i.exec(entry.name);
+      if (entry.isDirectory() && match) candidates.push({ file: path.join(artifactDir, entry.name, 'run.json'), caseNumber: Number(match[1]) });
     }
   }
+  candidates.sort((a, b) => a.caseNumber - b.caseNumber);
 
   const cases = [];
   for (const candidate of candidates) {
-    if (!fsSync.existsSync(candidate)) continue;
-    const artifact = await readJson(candidate);
+    if (!fsSync.existsSync(candidate.file)) continue;
+    const artifact = await readJson(candidate.file);
     cases.push({
+      caseNumber: candidate.caseNumber,
+      persona: artifact.persona ?? null,
       caseId: artifact.case?.commonGroundId ?? artifact.case?.id ?? null,
       status: artifact.status,
       workflowCompleted: artifact.workflowCompleted ?? false,
@@ -530,6 +566,17 @@ function appendLog(run, text) {
     run.logs.push(line);
     const artifactMatch = line.match(/Artifacts:\s*(.*)$/);
     if (artifactMatch) run.artifactDir = artifactMatch[1].trim();
+    // Runner logs "Case N persona: id (polish/detail)" at case start, so this
+    // reflects the in-flight case before its run.json is flushed.
+    const personaMatch = line.match(/^Case (\d+) persona: (\S+) \(([^/]+)\/([^)]+)\)/);
+    if (personaMatch) {
+      run.currentPersona = {
+        caseNumber: Number(personaMatch[1]),
+        id: personaMatch[2],
+        polish: personaMatch[3],
+        detail: personaMatch[4]
+      };
+    }
   }
   run.logs = run.logs.slice(-500);
 }
@@ -542,6 +589,7 @@ function publicRun(run) {
     finishedAt: run.finishedAt,
     exitCode: run.exitCode,
     artifactDir: run.artifactDir,
+    currentPersona: run.currentPersona ?? null,
     logs: run.logs
   };
 }
