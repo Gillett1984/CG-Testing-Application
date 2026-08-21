@@ -1079,7 +1079,15 @@ async function caseIsActive(page, config, createdCase) {
       const text = node.innerText || '';
       // The first ancestor carrying the party labels is the case's own card.
       if (/(Manager:|Employee:)/.test(text)) {
-        return /\bActive\b/i.test(text) || /Getting Started/i.test(text);
+        // Acceptance is proved by the card having moved PAST the invitation —
+        // not by the word "Active" (the redesign labels a case Active from
+        // creation) and not by this actor owning the next step: after
+        // accepting, the participant card reads "Next Up: Rabia shares their
+        // perspective", because the requestor goes first (CG-0095).
+        if (/Review Invitation/i.test(text)) return false;
+        const nextUp = (text.match(/Next(?: Up)?:\s*([^\n]*)/i) || ['', ''])[1];
+        if (/invitation/i.test(nextUp)) return false;
+        return /Next(?: Up)?:/i.test(text) || /Getting Started|Begin Discussion/i.test(text);
       }
       node = node.parentElement;
     }
@@ -1908,15 +1916,39 @@ async function waitForPostProcessing(page, config) {
 }
 
 async function labelFactStatements(page, config, labelText) {
+  // Instrumented so the cost of this step can be attributed rather than guessed:
+  // waiting for Common Ground to extract and render the statements is its time,
+  // clicking through them is ours. Reported per actor in the run log.
+  const startedAt = Date.now();
   await waitForFactLabelingReady(page, config, labelText);
+  const readyAt = Date.now();
   if (await factStatementsAlreadySubmitted(page)) {
     console.log('[fact-labels] Statements are already labelled and submitted; moving on without re-rating.');
     return;
   }
   const labelingUrl = page.url();
+  const statementCount = await countFactStatements(page);
   await selectAllFactStatementLabels(page, config, labelText);
+  const labelledAt = Date.now();
   await submitFactStatementRatings(page);
   await verifyFactStatementSubmission(page, labelingUrl);
+  const doneAt = Date.now();
+  const secs = (from, to) => ((to - from) / 1000).toFixed(1);
+  console.log(
+    `[fact-labels] ${statementCount || 'unknown'} statement(s) | waiting for the app to render them ${secs(startedAt, readyAt)}s`
+    + ` | labelling ${secs(readyAt, labelledAt)}s | submit+verify ${secs(labelledAt, doneAt)}s`
+    + ` | total ${secs(startedAt, doneAt)}s`
+  );
+}
+
+// Number of statements the labelling screen is showing, from its own counter.
+async function countFactStatements(page) {
+  return page.evaluate(() => {
+    const text = String(document.body?.innerText ?? '').replace(/\s+/g, ' ');
+    const counter = text.match(/(\d+)\s*\/\s*(\d+)\s+labell?ed/i);
+    if (counter) return Number(counter[2]);
+    return (text.match(/Statement\s+\d+/gi) ?? []).length || null;
+  }).catch(() => null);
 }
 
 // How long an "already finished" reading must hold before a wait accepts it and moves on.
@@ -1944,6 +1976,19 @@ async function completeActorPostProcessing(page, config, artifacts, actorLabel, 
   // Discussion Details does not auto-advance: it parks on a status list with a
   // "Next: <step>" link, and the step page only opens when that link is clicked. Without this
   // the wait below polls for a step screen that will never appear on its own (CG-0004).
+  // The page can arrive here still on the dashboard — a resumed run logs in
+  // fresh, and a hand-off can land there too. The dashboard carries no step
+  // links, so openPendingWorkflowStep would find nothing and the wait below
+  // would poll it forever (CG-0098, resumed at participant_facts). Open the
+  // case first so the pending step is reachable.
+  if (isDashboardPage(page.url(), await readVisibleBodyText(page))) {
+    const opened = await openCaseDetailsFromDashboard(page, artifacts.case, config.run.caseType)
+      .then(() => true).catch(() => false);
+    if (opened) {
+      await waitForIdle(page);
+      console.log(`[workflow] ${actorLabel}: opened ${artifacts.case?.commonGroundId ?? 'the case'} from the dashboard before resolving the pending step.`);
+    }
+  }
   await openPendingWorkflowStep(page);
 
   // Nothing left for this actor: every one of their steps in the status list is already

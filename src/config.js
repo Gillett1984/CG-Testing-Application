@@ -196,6 +196,13 @@ export function loadConfig(args) {
       scriptedAnswers,
       scenarioSeed: cli.scenarioSeed ?? runConfig.scenarioSeed ?? '',
       validateConfigOnly: cli.validateConfig,
+      // Measured across 14 manager-side interviews, turn count ranges 9-30 and is
+      // NOT predicted by answer length: a misaligned manager disputes the premise,
+      // so how far Partner AI drills depends mostly on how much concrete evidence
+      // the generated dossier gives them to cite. A ceiling at the top of that
+      // observed range fails healthy runs (CG-0068, CG-0099 both stopped at 30),
+      // so it sits well clear of it and the loop guard remains the real protection
+      // against a genuine non-terminating interview.
       // A misaligned scenario is DESIGNED to produce gap-heavy, premise-disputing
       // answers, so Partner AI legitimately drills deeper than the calibrated
       // one-turn-per-question baseline (observed: ~11 follow-ups on one impact
@@ -203,7 +210,7 @@ export function loadConfig(args) {
       // ceiling was set explicitly; runaway loops are the loop-guard's job, not
       // this ceiling's.
       maxTurns: cli.maxTurns ?? runConfig.maxTurns
-        ?? (/misaligned/i.test(alignmentScenarioId) ? Math.max(env.MAX_TURNS, 30) : env.MAX_TURNS),
+        ?? (/misaligned/i.test(alignmentScenarioId) ? Math.max(env.MAX_TURNS, 45) : env.MAX_TURNS),
       postCompletionWaitMs: scenarioFoundation?.topic.workflow.postProcessingTimeoutMs
         ?? (workflowScope === 'requestor_participant' ? Math.max(env.POST_COMPLETION_WAIT_MS, 420000) : env.POST_COMPLETION_WAIT_MS)
     },

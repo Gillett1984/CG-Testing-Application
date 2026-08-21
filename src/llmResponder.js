@@ -126,14 +126,98 @@ async function generateOpenAiResponse(context) {
     return relevanceOnly.text;
   }
 
-  throw new Error([
-    'OpenAI generated an off-target synthetic response after retry.',
-    `Initial issue: ${firstCheck.reason}`,
-    `Retry issue: ${revisedCheck.reason}`,
-    `Latest Partner AI prompt: ${promptContext.activeQuestion || promptContext.latestPartnerTurn}`,
-    `Retry response (${revisedText.length} chars${revisedText.length > 500 ? ', first 500 shown' : ''}): ${revisedText.slice(0, 500)}${revisedText.length > 500 ? ' […log-truncated, not model-truncated]' : ''}`,
-    compactedRetry ? `Compression issue: ${compactedRetry.validation.reason}` : null
-  ].filter(Boolean).join('\n'));
+  const fallback = await resolveWithoutFailing(context.llm, generationInput, [
+    { text: firstText, check: firstCheck },
+    { text: revisedText, check: revisedCheck }
+  ], promptContext);
+  context.responseValidationWarnings = fallback.warnings;
+  return fallback.text;
+}
+
+// The required opening sentence for a primary-question turn, or '' when this
+// turn does not demand one.
+function requiredOpeningFor(input) {
+  if (!input?.turnClassification?.isPrimaryQuestionTurn) return '';
+  const expression = input.scenarioTurn?.scenarioContext?.scenarioExpression;
+  if (!expression) return '';
+  return String(input.actorPerspective === 'manager_evaluating_employee'
+    ? expression.managerOpeningStatement ?? ''
+    : expression.employeeOpeningStatement ?? '');
+}
+
+function responseLooksComplete(text) {
+  return /[.!?]["')\]]*$/.test(String(text ?? '').trim());
+}
+
+// Response generation must never end a run.
+//
+// The judge is advisory: Partner AI's own QoR scoring is the authoritative
+// referee for answer quality, and that scoring is the thing under test. A
+// two-party workflow costs an hour of wall-clock, so discarding one over a
+// subjective objection to a single synthetic sentence is the wrong trade —
+// every abort this harness suffered after the 2026-08-20 staging promotion was
+// this class (CG-0092, CG-0093, CG-0096).
+//
+// Order of preference:
+//   1. Repair what is mechanically repairable — a missing required opening is
+//      a prefix, not a rewrite, so prepend it rather than re-prompting.
+//   2. Otherwise submit the newest candidate that cleared every DETERMINISTIC
+//      check. A judge-sourced verdict is itself that proof, because
+//      deterministic checks return before the judge is ever called.
+//   3. Otherwise submit the newest candidate that at least reads as complete.
+// In every case the unresolved concern is recorded so the artifact stays honest.
+export async function resolveWithoutFailing(llm, input, candidates, promptContext) {
+  const ordered = candidates.filter((candidate) => candidate?.text).reverse();
+
+  const requiredOpening = requiredOpeningFor(input);
+  if (requiredOpening) {
+    for (const candidate of ordered) {
+      const normalizedText = candidate.text.replace(/\s+/g, ' ').trim();
+      const normalizedOpening = requiredOpening.replace(/\s+/g, ' ').trim();
+      if (!normalizedOpening || normalizedText.toLowerCase().startsWith(normalizedOpening.toLowerCase())) continue;
+      const repairedText = `${requiredOpening} ${candidate.text}`.replace(/\s+/g, ' ').trim();
+      const repairedCheck = await validateGeneratedResponse(llm, input, repairedText);
+      if (repairedCheck.pass) {
+        return {
+          text: repairedText,
+          warnings: [
+            ...(repairedCheck.warnings ?? []),
+            {
+              type: 'response_opening_repaired',
+              passed: false,
+              expected: 'The generated answer begins with the assigned scenario conclusion.',
+              observed: 'It did not, so the required opening sentence was prepended verbatim before submitting.'
+            }
+          ]
+        };
+      }
+    }
+  }
+
+  const deterministicallyClean = ordered.find((candidate) => candidate.check?.source === 'judge_llm'
+    && !candidate.check.parseFailure
+    && responseLooksComplete(candidate.text));
+  const pick = deterministicallyClean
+    ?? ordered.find((candidate) => responseLooksComplete(candidate.text))
+    ?? ordered[0];
+
+  const reason = String(pick.check?.reason ?? 'unknown').slice(0, 220);
+  console.warn(`[validation] Submitting the best available candidate after retries; Partner AI QoR is the referee. Last objection: ${reason}`);
+  return {
+    text: pick.text,
+    warnings: [
+      ...(pick.check?.warnings ?? []),
+      {
+        type: deterministicallyClean ? 'response_quality_unverified' : 'response_submitted_with_unresolved_check',
+        passed: false,
+        expected: 'The generated answer satisfies every internal validation before submission.',
+        observed: `${deterministicallyClean
+          ? 'It cleared every deterministic check but the advisory judge still objected'
+          : 'No candidate cleared every internal check'}; the best candidate was submitted so the workflow could continue. `
+          + `Prompt: "${String(promptContext?.activeQuestion ?? '').slice(0, 140)}". Last objection: ${reason}`
+      }
+    ]
+  };
 }
 
 // Decide whether two failed validations were mere relevance opinions from the
@@ -149,9 +233,17 @@ async function generateOpenAiResponse(context) {
 // subject matter ("...incomplete workflow details..."), which misclassified a
 // relevance opinion as a structural defect and aborted the run (CG-0083).
 // Deterministic tool-side checks carry no source tag and are never downgraded.
-function relevanceOnlyValidationOutcome(firstCheck, revisedCheck, revisedText, promptContext) {
+export function relevanceOnlyValidationOutcome(firstCheck, revisedCheck, revisedText, promptContext) {
+  // The verdict that matters is the one on the text that would actually be
+  // submitted. Deterministic checks return BEFORE the judge is called, so a
+  // judge-sourced verdict on the retry is itself proof that the retry passed
+  // every tool-side check - voice, scenario contract, opening statement,
+  // guidance scope, specificity. What the first draft got wrong is irrelevant
+  // once the retry fixed it; gating on the draft aborted runs whose retry was
+  // sound (CG-0092 and CG-0093: the draft missed the required opening, the
+  // retry reproduced it verbatim, and the case died anyway).
+  if (revisedCheck?.source !== 'judge_llm' || revisedCheck.parseFailure) return null;
   const checks = [firstCheck, revisedCheck];
-  if (!checks.every((check) => check?.source === 'judge_llm' && !check.parseFailure)) return null;
   // Truncation is decided by looking at the text, not by trusting either party
   // to describe it: never submit a response that stops mid-sentence.
   if (!/[.!?]["')\]]*$/.test(String(revisedText ?? '').trim())) return null;
@@ -232,14 +324,11 @@ async function generateCheckedResponse(llm, generationInput) {
   if (relevanceOnly) {
     return { text: relevanceOnly.text, validation: { pass: true, downgraded: true, warnings: relevanceOnly.warnings } };
   }
-  throw new Error([
-    'OpenAI generated an off-target synthetic response after retry.',
-    `Initial issue: ${firstCheck.reason}`,
-    `Retry issue: ${revisedCheck.reason}`,
-    `Latest Partner AI prompt: ${generationInput.activePrompt.activeQuestion || generationInput.activePrompt.latestPartnerTurn}`,
-    `Retry response (${revisedText.length} chars${revisedText.length > 500 ? ', first 500 shown' : ''}): ${revisedText.slice(0, 500)}${revisedText.length > 500 ? ' […log-truncated, not model-truncated]' : ''}`,
-    compactedRetry ? `Compression issue: ${compactedRetry.validation.reason}` : null
-  ].filter(Boolean).join('\n'));
+  const fallback = await resolveWithoutFailing(llm, generationInput, [
+    { text: firstText, check: firstCheck },
+    { text: revisedText, check: revisedCheck }
+  ], generationInput.activePrompt);
+  return { text: fallback.text, validation: { pass: true, bestEffort: true, warnings: fallback.warnings } };
 }
 
 async function tryCompactResponse(llm, generationInput, candidateResponse, validation) {
@@ -258,7 +347,7 @@ async function tryCompactResponse(llm, generationInput, candidateResponse, valid
           'Shorten the supplied workplace interview response without changing its meaning or facts.',
           'Return only the rewritten response.',
           fullCoverage
-            ? 'Keep one distinct sentence for every answer-guidance point the response covers — tighten wording, never drop a point. Up to 9 short sentences and 220 words total.'
+            ? `Keep one distinct sentence for every answer-guidance point the response covers — tighten wording, never drop a point, and keep each point's concrete anchor and consequence. Up to ${coverageAllowance(generationInput).sentences} short sentences and ${coverageAllowance(generationInput).words} words total.`
             : 'Use 2 or 3 sentences and no more than 75 words total.',
           'Keep every sentence at 28 words or fewer.',
           'Use common words at an eighth-grade reading level.',
@@ -286,6 +375,44 @@ async function tryCompactResponse(llm, generationInput, candidateResponse, valid
 
 function isCompactStyleFailure(validation) {
   return /sentence|word limit|required reading level|too complex/i.test(String(validation?.reason ?? ''));
+}
+
+// How many answer-guidance points the active question puts on screen. These are
+// the coverage points Partner AI scores the answer against, so they set how long
+// a full-coverage reply has to be.
+function guidancePointCount(input) {
+  return input?.activePrompt?.answerGuidance?.length
+    ?? input?.activeQualityCriteria?.length
+    ?? 0;
+}
+
+// Budget for a full-coverage answer, scaled to the number of guidance points
+// rather than fixed. One sentence per point is the minimum that can satisfy the
+// scoring contract, plus a little room for the lead conclusion.
+export function coverageAllowance(input) {
+  const points = guidancePointCount(input);
+  const sentences = Math.max(4, points + 2);
+  return { points, sentences, words: Math.max(120, sentences * 32) };
+}
+
+// The Partner AI scoring contract, restated as generation rules. A criterion
+// counts only when one quotable sentence FULLY satisfies it: the grader is
+// explicit that naming is not detailing, listing is not connecting, and stating
+// is not explaining. One mandatory criterion left partial caps the turn at 75,
+// which is Moderate, which earns another probe — measured on CG-0088, where 12
+// of 23 manager turns scored exactly 75 and each cost about a minute.
+function coverageInstruction(input) {
+  const { points, sentences, words } = coverageAllowance(input);
+  return [
+    points
+      ? `The answer guidance lists ${points} coverage point(s). Keep the required opening sentence first, then write at least one distinct sentence for each point, in the order listed.`
+      : 'Keep the required opening sentence first, then write one distinct sentence for each coverage point the guidance lists, in the order listed.',
+    'Each sentence must fully satisfy its own point: name the specific thing, give a concrete anchor (a number, date, document, or role), and state the consequence that followed. Implied or adjacent coverage does not count.',
+    'When a point asks about "each" of several items, name only two or three items and fully cover every one you name; partial coverage of a longer list counts for nothing.',
+    'When your assigned stance disputes an outcome the prompt assumes, answer the linkage explicitly in negative form using the pattern: what actually happened (with its number or date), the standard or expectation it fell short of, and the consequence that followed. "Quality was uneven" is not an answer; "the 1.2% error rate exceeded the 0.5% acceptance bar, so the March sign-off slipped three weeks" is.',
+    'Do not hedge with words like somewhat, generally, broadly, or to some extent; hedged coverage is scored as partial.',
+    `Use up to about ${sentences} short sentences (~${words} words). Never drop a coverage point to stay short.`
+  ].join(' ');
 }
 
 // A turn that must cover every answer-guidance point of the active question in
@@ -1084,14 +1211,7 @@ function buildGenerationMessages(input, correction = null) {
     'Never include real personal data.',
     'Do not mention that you are an AI or that this is a test unless directly useful as synthetic content.',
     'Write at an eighth-grade reading level using common words and short sentences.',
-    wantsFullCoverage
-      // Calibrated to the Partner AI QoR contract: a criterion only counts as
-      // met when a single quotable sentence FULLY satisfies it (implied or
-      // adjacent coverage scores unmet; one partial mandatory caps the score
-      // below the advance threshold). "For each item" criteria are scored
-      // per-item — partial item coverage cannot aggregate to met.
-      ? 'For a high-quality answer, write one distinct, specific sentence for EACH answer-guidance point; each sentence must fully satisfy its point on its own, naming the concrete situation, action, and outcome or metric — implied or adjacent coverage does not count. When a point asks about "each" of several items, name only two or three items and fully cover every one named. When your assigned stance disputes an outcome or impact the prompt asks about, still answer the asked linkage explicitly in negative form — state that the impact did not materialize and quantify the shortfall (e.g. "the early delivery did not improve decision-making: defect rates stayed at 8%") rather than only describing shortcomings. Use up to about 9 short sentences (~220 words); never drop a guidance point to stay short.'
-      : 'Keep every submitted response to no more than 3 sentences and 75 words total.',
+    wantsFullCoverage ? coverageInstruction(input) : 'Keep every submitted response to no more than 3 sentences and 75 words total.',
     'A behavior-only request may be a single sentence when one sentence is natural.',
     'Keep the answer concise and plausible, but never cut off mid-sentence.',
     'Return a complete, submit-ready answer. If many criteria are requested, cover each briefly rather than leaving the response incomplete.',
@@ -1173,7 +1293,13 @@ function buildGenerationMessages(input, correction = null) {
 }
 
 async function validateGeneratedResponse(llm, input, candidateResponse) {
-  const styleCheck = validateCompactResponseStyle(candidateResponse);
+  // Judge brevity against the allowance this turn was actually given: a
+  // full-coverage answer is required to be longer, so the compact thresholds
+  // would flag every one of them as a style problem.
+  const styleCheck = validateCompactResponseStyle(
+    candidateResponse,
+    wantsFullCoverageTurn(input) ? coverageAllowance(input) : undefined
+  );
   const styleWarnings = styleCheck.warnings ?? [];
   if (isRoleSwappedResponse(candidateResponse, input.activeManeuver, input.policyDecision)) {
     return {
@@ -1213,6 +1339,10 @@ async function validateGeneratedResponse(llm, input, candidateResponse) {
         content: [
           'You are a strict QA judge for a synthetic user response.',
           'Return only valid JSON with keys: pass, reason, correction.',
+          // A verdict that runs past max_tokens arrives as unparsable JSON, which
+          // is treated as no verdict at all — two in a row abort the case. Long
+          // objections that quote the answer back are the usual cause.
+          'Keep "reason" under 200 characters and "correction" under 200 characters. State the problem plainly; do not quote the response back at length.',
           'The policyDecision is the highest-priority behavioral control when present.',
           'The perspectiveContract field is authoritative and final for perspective. Judge perspective ONLY against perspectiveContract.requiredGrammaticalPerson.',
           'Do not infer perspective from actorRole. Either actor can hold either domain role: for a Raise the requestor is the employee, for a Performance Review the requestor is the manager. actorRole "requestor" does NOT imply manager, and "participant" does NOT imply employee.',
@@ -1262,9 +1392,10 @@ async function validateGeneratedResponse(llm, input, candidateResponse) {
     ],
     model: llm.judgeModel ?? llm.model,
     temperature: 0,
-    // 300 truncated verdict JSON mid-reason on verbose objections, leaving the
-    // parser with invalid JSON instead of a verdict.
-    max_tokens: 500,
+    // Headroom above the 200-character reason/correction the prompt asks for, so
+    // an occasionally verbose verdict still lands as parsable JSON. 300 and then
+    // 500 both truncated mid-reason on perspective objections.
+    max_tokens: 700,
     response_format: { type: 'json_object' }
   });
 
@@ -1976,6 +2107,22 @@ function parseValidationResult(rawText) {
       correction: String(parsed.correction ?? 'Rewrite the response to directly answer the latest Partner AI prompt.')
     };
   } catch {
+    // The verdict is malformed, but a truncated or degenerate one usually still
+    // carries its decision in the readable prefix. Observed: the judge opened a
+    // reason containing a quote character and then emitted "I": true, "my":
+    // true ... until it hit the token cap. Salvaging the leading pass/reason
+    // recovers a real verdict — and, for perspective objections, lets the
+    // deterministic perspective guard adjudicate it as it normally would.
+    const salvagedPass = rawText.match(/"pass"\s*:\s*(true|false)/i);
+    if (salvagedPass) {
+      const salvagedReason = rawText.match(/"reason"\s*:\s*"([^"]*)/i);
+      return {
+        pass: salvagedPass[1].toLowerCase() === 'true',
+        salvaged: true,
+        reason: salvagedReason ? salvagedReason[1] : 'Validation returned malformed JSON; the decision was salvaged from its prefix.',
+        correction: 'Rewrite the response to directly answer the latest Partner AI prompt.'
+      };
+    }
     return {
       pass: false,
       // No verdict was actually rendered, so this is not a relevance opinion and
@@ -2006,32 +2153,34 @@ function responseTokenBudget(input, isRetry = false) {
   if (input.policyDecision?.useQualityCriteria === false) return isRetry ? 220 : 180;
 
   // Full-coverage turns (high-quality answers covering all mandatory guidance)
-  // need room to cover every point in one reply; scale with the number of points.
-  const guidanceCount = input.scenarioTurn?.scenarioContext?.question?.answerGuidance?.length
-    ?? input.activeQualityCriteria?.length ?? 0;
-  const coverageBudget = guidanceCount >= 7 ? 640 : guidanceCount >= 5 ? 520 : guidanceCount >= 3 ? 440 : 360;
+  // need room to cover every point in one reply. Derived from the same
+  // allowance the instruction states, at ~1.6 tokens per word plus headroom, so
+  // the budget can never be the reason a stated point goes missing.
+  const coverageBudget = Math.max(360, Math.round(coverageAllowance(input).words * 1.6) + 120);
   return isRetry ? coverageBudget + 80 : coverageBudget;
 }
 
-export function validateCompactResponseStyle(value) {
+export function validateCompactResponseStyle(value, allowance) {
+  const maxSentences = allowance?.sentences ?? 3;
+  const maxWords = allowance?.words ?? 75;
   const text = String(value ?? '').trim();
   const sentences = countResponseSentences(text);
   const words = text.split(/\s+/).filter(Boolean);
   const longestSentence = Math.max(0, ...splitResponseSentences(text).map((sentence) => sentence.split(/\s+/).filter(Boolean).length));
   const warnings = [];
-  if (sentences > 3) {
+  if (sentences > maxSentences) {
     warnings.push({
       type: 'response_brevity',
       passed: false,
-      expected: 'No more than 3 sentences when possible.',
+      expected: `No more than ${maxSentences} sentences when possible.`,
       observed: `The response has ${sentences} sentences.`
     });
   }
-  if (words.length > 75) {
+  if (words.length > maxWords) {
     warnings.push({
       type: 'response_brevity',
       passed: false,
-      expected: 'No more than 75 words when possible.',
+      expected: `No more than ${maxWords} words when possible.`,
       observed: `The response has ${words.length} words.`
     });
   }

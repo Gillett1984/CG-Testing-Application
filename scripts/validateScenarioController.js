@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildBehaviorCompositionPlan, validateCompactResponseStyle, validateScenarioResponse, verifyScenarioBehaviors } from '../src/llmResponder.js';
+import { buildBehaviorCompositionPlan, coverageAllowance, validateCompactResponseStyle, validateScenarioResponse, verifyScenarioBehaviors } from '../src/llmResponder.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +29,24 @@ assert.equal(validateCompactResponseStyle(Array.from({ length: 76 }, () => 'word
 assert.ok(validateCompactResponseStyle(Array.from({ length: 76 }, () => 'word').join(' ')).warnings.some((warning) => warning.type === 'response_brevity'), 'A response over 75 words must create a brevity warning.');
 assert.equal(validateCompactResponseStyle(`${Array.from({ length: 29 }, () => 'word').join(' ')}.`).pass, true, 'A sentence over 28 words must not hard fail.');
 assert.ok(validateCompactResponseStyle(`${Array.from({ length: 29 }, () => 'word').join(' ')}.`).warnings.some((warning) => warning.type === 'response_reading_level'), 'A long sentence must create a reading-level warning.');
+
+// A full-coverage turn must be allowed one sentence per guidance point: Partner
+// AI scores every point, and a criterion left partial caps the turn at 75 and
+// earns another probe. The compact defaults apply only when no allowance is given.
+const sevenPointAllowance = coverageAllowance({ activePrompt: { answerGuidance: new Array(7).fill('point') } });
+assert.equal(sevenPointAllowance.sentences, 9, 'Seven guidance points must allow a sentence each plus a lead and a close.');
+assert.ok(sevenPointAllowance.words >= 7 * 32, 'The word allowance must scale with the number of guidance points.');
+assert.equal(coverageAllowance({}).sentences, 4, 'With no guidance on screen the allowance must still permit a complete answer.');
+const coverageAnswer = Array.from({ length: 8 }, (_, index) => `Point ${index + 1} was missed against its stated target, so the milestone slipped.`).join(' ');
+assert.equal(
+  validateCompactResponseStyle(coverageAnswer, sevenPointAllowance).warnings.filter((warning) => warning.type === 'response_brevity').length,
+  0,
+  'A coverage answer judged against its own allowance must not raise brevity warnings.'
+);
+assert.ok(
+  validateCompactResponseStyle(coverageAnswer).warnings.some((warning) => warning.type === 'response_brevity'),
+  'The same answer judged against the compact defaults must still warn, so the defaults are unchanged.'
+);
 
 const first = createScenarioController({
   foundation,
