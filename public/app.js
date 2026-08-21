@@ -5,16 +5,11 @@ const fields = {
   existingCaseIdField: document.querySelector('#existingCaseIdField'),
   factRatingStage: document.querySelector('#factRatingStage'),
   factRatingStageField: document.querySelector('#factRatingStageField'),
-  interviewStartActor: document.querySelector('#interviewStartActor'),
   alignmentScenario: document.querySelector('#alignmentScenario'),
   numberOfCases: document.querySelector('#numberOfCases'),
   personaMode: document.querySelector('#personaMode'),
   maxTurns: document.querySelector('#maxTurns'),
   scenarioSeed: document.querySelector('#scenarioSeed'),
-  dossierMode: document.querySelector('#dossierMode'),
-  dossierVariationPrompt: document.querySelector('#dossierVariationPrompt'),
-  screenshotMode: document.querySelector('#screenshotMode'),
-  reuseAuthState: document.querySelector('#reuseAuthState'),
   stopOnFailure: document.querySelector('#stopOnFailure'),
   testObjective: document.querySelector('#testObjective'),
   headed: document.querySelector('#headed'),
@@ -168,11 +163,6 @@ async function boot() {
   fields.personaMode.value = personaModeLabel(defaults.personas);
   fields.personaMode.title = (defaults.personas?.personas ?? []).map((p) => p.id).join(', ') || 'No personas configured';
   fields.scenarioSeed.value = defaults.runConfig.scenarioSeed ?? '';
-  fields.interviewStartActor.value = defaults.runConfig.interviewStartActor ?? 'employee';
-  fields.dossierMode.value = defaults.runConfig.dossierMode ?? 'fresh';
-  fields.dossierVariationPrompt.value = defaults.runConfig.dossierVariationPrompt ?? '';
-  fields.screenshotMode.value = defaults.runConfig.screenshotMode ?? 'failures_only';
-  fields.reuseAuthState.checked = defaults.runConfig.reuseAuthState !== false;
   elements.envSummary.textContent = [
     defaults.productionUrl ? `Target: ${defaults.productionUrl}` : 'Target URL missing',
     defaults.hasOpenAiKey ? 'OpenAI configured' : 'OpenAI key missing',
@@ -509,11 +499,6 @@ function collectPayload() {
       existingCaseId,
       factRatingStage: fields.factRatingStage.value,
       workflowScope: runMode === 'full_workflow' ? 'requestor_participant' : runMode === 'participant_getting_started' ? 'participant' : 'requestor',
-      interviewStartActor: fields.interviewStartActor.value,
-      dossierMode: fields.dossierMode.value,
-      dossierVariationPrompt: fields.dossierVariationPrompt.value.trim(),
-      screenshotMode: fields.screenshotMode.value,
-      reuseAuthState: fields.reuseAuthState.checked,
       testObjective: fields.testObjective.value.trim(),
       alignmentScenarioId: fields.alignmentScenario.value,
       scenarioSeed: fields.scenarioSeed.value.trim(),

@@ -63,13 +63,6 @@
             </select>
           </label>
           <label>
-            <span>Interview Starts With</span>
-            <select id="interviewStartActor">
-              <option value="employee">Employee</option>
-              <option value="manager">Manager</option>
-            </select>
-          </label>
-          <label>
             <span>Named Scenario</span>
             <select id="alignmentScenario"></select>
           </label>
@@ -90,38 +83,13 @@
             <input id="scenarioSeed" type="text" placeholder="Generated from run ID when blank">
           </label>
           <label>
-            <span>Scenario Dossier Source</span>
-            <select id="dossierMode">
-              <option value="fresh">Create fresh dossier</option>
-              <option value="auto">Reuse matching dossier when available</option>
-              <option value="cached">Require matching cached dossier</option>
-            </select>
-          </label>
-          <label>
-            <span>Screenshots</span>
-            <select id="screenshotMode">
-              <option value="failures_only">Failures only</option>
-              <option value="all">All checkpoints</option>
-              <option value="none">None</option>
-            </select>
-          </label>
-          <label>
             <span>Failure Behavior</span>
             <select id="stopOnFailure">
               <option value="true">Stop batch on case failure</option>
               <option value="false">Continue batch</option>
             </select>
           </label>
-          <label class="toggle">
-            <input id="reuseAuthState" type="checkbox" checked>
-            <span>Reuse logged-in sessions</span>
-          </label>
         </div>
-
-        <label class="full">
-          <span>Fresh Dossier Prompt / Variation Request</span>
-          <textarea id="dossierVariationPrompt" rows="2" placeholder="Optional: ask for a different role, project setting, metrics, or accomplishment pattern."></textarea>
-        </label>
 
         <label class="full">
           <span>Test Objective Metadata</span>

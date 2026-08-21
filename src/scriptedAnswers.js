@@ -19,23 +19,22 @@ export function loadScriptedAnswers(rootDir, relativePath) {
   return scriptedAnswersSchema.parse(raw);
 }
 
-// In the live Common Ground performance-review flow the invited participant is
-// the Employee being reviewed (first-person self-evaluation) and the requestor
-// who created the case is the Manager (third-person assessment). So the
-// participant speaks with the employee answer and the requestor with the manager
-// answer.
-function actorAnswerKey(actorRole, actorPersona = null) {
-  if (actorPersona === 'employee' || actorPersona === 'manager') return actorPersona;
-  return actorRole === 'participant' ? 'employee' : 'manager';
+// Scripted-answer files are keyed by domain role (`employee` / `manager`), which is
+// invariant to who created the case. Which actor speaks each answer depends on the
+// per-topic requestorRole: the redesigned Common Ground creates Performance Review from
+// the manager's side (requestor = manager), while a Raise is employee-initiated
+// (requestor = employee). The routing lives in src/roleMapping.js.
+function actorAnswerKey(actorRole, requestorRole) {
+  return domainRoleForActor(actorRole, requestorRole); // 'employee' | 'manager'
 }
 
 // Returns the scripted answer string for an actor + primary question, or null
 // when no answer is scripted for that side (caller then falls back to the LLM).
-export function pickScriptedAnswer(scriptedAnswers, primaryQuestionId, actorRole, actorPersona = null) {
+export function pickScriptedAnswer(scriptedAnswers, primaryQuestionId, actorRole, requestorRole) {
   if (!scriptedAnswers || !primaryQuestionId) return null;
   const entry = scriptedAnswers.answers.find((item) => item.primaryQuestionId === primaryQuestionId);
   if (!entry) return null;
-  return entry[actorAnswerKey(actorRole, actorPersona)] ?? null;
+  return entry[actorAnswerKey(actorRole, requestorRole)] ?? null;
 }
 
 // Cross-checks a scripted-answers file against a topic definition. Returns
