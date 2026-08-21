@@ -36,6 +36,11 @@ const runConfigSchema = z.object({
   existingCaseId: z.string().optional(),
   factRatingStage: z.enum(['requestor_own', 'participant_rates_requestor', 'participant_own', 'requestor_rates_participant']).optional(),
   workflowScope: z.enum(['requestor', 'participant', 'requestor_participant']).optional(),
+  interviewStartActor: z.enum(['employee', 'manager']).optional(),
+  dossierMode: z.enum(['fresh', 'auto', 'cached']).optional(),
+  dossierVariationPrompt: z.string().optional(),
+  screenshotMode: z.enum(['all', 'failures_only', 'none']).optional(),
+  reuseAuthState: z.boolean().optional(),
   testObjective: z.string().optional(),
   testBehaviorPolicy: z.string().optional(),
   numberOfCases: z.number().int().positive().optional(),
@@ -174,6 +179,11 @@ export function loadConfig(args) {
       existingCaseId,
       factRatingStage: cli.factRatingStage ?? runConfig.factRatingStage ?? 'participant_rates_requestor',
       workflowScope,
+      interviewStartActor: cli.interviewStartActor ?? runConfig.interviewStartActor ?? 'employee',
+      dossierMode: cli.dossierMode ?? runConfig.dossierMode ?? 'fresh',
+      dossierVariationPrompt: cli.dossierVariationPrompt ?? runConfig.dossierVariationPrompt ?? '',
+      screenshotMode: cli.screenshotMode ?? runConfig.screenshotMode ?? 'failures_only',
+      reuseAuthState: cli.reuseAuthState ?? runConfig.reuseAuthState ?? true,
       testObjective: cli.testObjective ?? runConfig.testObjective ?? 'Complete the Getting Started interview using only synthetic data.',
       testBehaviorPolicy: cli.testBehaviorPolicy ?? runConfig.testBehaviorPolicy ?? 'Answer each Partner AI question according to the high-quality criteria.',
       numberOfCases,
@@ -241,6 +251,12 @@ function parseArgs(args) {
     if (arg === '--resume-phase') { parsed.resumePhase = args[index + 1]; parsed.runMode = parsed.runMode ?? 'resume_case'; }
     if (arg === '--fact-rating-stage') parsed.factRatingStage = args[index + 1];
     if (arg === '--workflow-scope') parsed.workflowScope = args[index + 1];
+    if (arg === '--interview-start-actor') parsed.interviewStartActor = args[index + 1];
+    if (arg === '--dossier-mode') parsed.dossierMode = args[index + 1];
+    if (arg === '--dossier-variation-prompt') parsed.dossierVariationPrompt = args[index + 1];
+    if (arg === '--screenshot-mode') parsed.screenshotMode = args[index + 1];
+    if (arg === '--reuse-auth-state') parsed.reuseAuthState = true;
+    if (arg === '--no-reuse-auth-state') parsed.reuseAuthState = false;
     if (arg === '--test-objective') parsed.testObjective = args[index + 1];
     if (arg === '--test-behavior-policy') parsed.testBehaviorPolicy = args[index + 1];
     if (arg === '--quality-criteria') parsed.qualityCriteriaPath = args[index + 1];

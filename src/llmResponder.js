@@ -41,14 +41,13 @@ export async function verifyOpenAiConnectivity(llm, options = {}) {
   throw new Error(`OpenAI preflight failed before Common Ground case creation: ${describeError(lastError)}${tlsHint}`, { cause: lastError });
 }
 
-export async function generateScenarioDossiers({ llm, topic, scenario, seed, caseNumber, persona }) {
+export async function generateScenarioDossiers({ llm, topic, scenario, seed, variationPrompt = '' }) {
   return buildScenarioDossiers({
     llm,
     topic,
     scenario,
     seed,
-    caseNumber,
-    persona,
+    variationPrompt,
     completeJson: async (activeLlm, request) => {
       const text = await createChatCompletion(activeLlm, {
         messages: [
@@ -430,7 +429,7 @@ function wantsFullCoverageTurn(input) {
 function buildGenerationInput(context, promptContext, activeQualityCriteria) {
   const actorPerspective = resolveActorPerspective({
     actorRole: context.actorRole ?? 'requestor',
-    requestorRole: context.requestorRole,
+    actorPersona: context.actorPersona,
     scriptedMode: context.scriptedMode ?? false,
     promptContext,
     transcript: context.transcript,
@@ -466,6 +465,7 @@ function buildScenarioPolicyDecision(input, behaviorPlan = buildBehaviorComposit
   const scenarioTurn = input.scenarioTurn;
   const assignments = scenarioTurn.behaviors ?? [];
   const directives = assignments.map((assignment) => scenarioBehaviorDirective(assignment)).filter(Boolean);
+  const allowsPlannedContradiction = assignments.some((assignment) => assignment.behaviorId === 'contradiction' && assignment.stage === 'contradict_fact');
 
   return {
     action: behaviorPlan.mode === 'defer' ? 'perform_behavior_only' : 'answer',
@@ -485,13 +485,22 @@ function buildScenarioPolicyDecision(input, behaviorPlan = buildBehaviorComposit
       behaviorPlan.mode === 'defer'
         ? 'The scheduled behavior takes precedence. Do not include the substantive scenario answer on this turn; it is preserved for a later response.'
         : 'Use the baseScenarioResponse as the substantive answer, changing only what is necessary to visibly perform the scheduled behavior.',
+      allowsPlannedContradiction
+        ? 'For contradiction:contradict_fact, contradict only the retained earlier fact for that scheduled behavior. Do not contradict the employee role, shared event, project, rating stance, actor perspective, or unrelated retained facts.'
+        : '',
       ...directives
-    ].join(' '),
+    ].filter(Boolean).join(' '),
     mustAddress: [
       ...(behaviorPlan.mode === 'defer' ? [] : ['the latest Partner AI prompt', 'the assigned actor rating interpretation']),
       ...assignments.map((assignment) => `${assignment.behaviorId}:${assignment.stage}`)
     ],
-    mustAvoid: ['changing the shared event', 'changing the employee role', 'answering from the other actor perspective', 'softening or reversing the assigned rating'],
+    mustAvoid: [
+      'changing the shared event',
+      'changing the employee role',
+      'answering from the other actor perspective',
+      'softening or reversing the assigned rating',
+      ...(allowsPlannedContradiction ? ['contradicting anything except the scheduled retained fact'] : [])
+    ],
     stopAfterResponse: false,
     reason: assignments.length
       ? `Materialized scenario behavior controls this turn in ${behaviorPlan.mode} mode.`
@@ -1259,13 +1268,17 @@ function buildGenerationMessages(input, correction = null) {
       'When a term\'s assigned ratingId is "unsatisfactory" or "needs_improvement", lead with that conclusion in plain strong language (e.g. materially below expectations / meaningful gaps requiring focused improvement) and do not soften it into a balanced, mixed, or neutral assessment; mention favorable counter-evidence only briefly and explain why it does not change the rating. When the assigned ratingId is "outstanding" or "exceeds_expectations", state that strong conclusion first and do not hedge it down toward "meets expectations".'
     );
     if (input.behaviorPlan) {
+      const allowsPlannedContradiction = input.behaviorPlan.stages.includes('contradiction:contradict_fact');
       systemContent.push(
         `Behavior composition mode: ${input.behaviorPlan.mode}.`,
         `Required visible behavior stages: ${input.behaviorPlan.stages.join(', ')}.`,
         input.behaviorPlan.mode === 'defer'
           ? 'Return only the behavior response. Do not include or summarize baseScenarioResponse yet.'
           : 'Preserve the substance of baseScenarioResponse while visibly applying every required behavior stage.',
-        'A behavior counts only when its required words or structure are plainly visible in the submitted response. Make the behavior unmistakable: for a clarification, definition, or example request include a direct question; for uncertainty, say plainly that you are unsure or it is hard to judge; for fatigue, say plainly that this is tiring or hard to focus on.'
+        'A behavior counts only when its required words or structure are plainly visible in the submitted response. Make the behavior unmistakable: for a clarification, definition, or example request include a direct question; for uncertainty, say plainly that you are unsure or it is hard to judge; for fatigue, say plainly that this is tiring or hard to focus on.',
+        allowsPlannedContradiction
+          ? 'For contradiction:contradict_fact, the only allowed inconsistency is with the retained fact attached to that scheduled behavior. Keep all immutable scenario facts, role, project, actor perspective, and rating stance unchanged.'
+          : ''
       );
     }
   }
@@ -1359,6 +1372,7 @@ async function validateGeneratedResponse(llm, input, candidateResponse) {
           'Do not fail a response for missing the prompt\'s exact framing or magic words. If the response substantively provides the requested information — for example, explaining why each named item mattered when asked why they were important — it directly answers the prompt even without restating phrases like "for the project\'s success" or mirroring the prompt\'s wording.',
           'If policyDecision.useQualityCriteria is false, do not require high-quality criteria coverage.',
           'If policyDecision.action is perform_behavior_only, the response must visibly perform the scheduled behavior and must not be required to answer the substantive prompt yet.',
+          'If scenarioTurn.behaviors includes contradiction:contradict_fact, allow a conflict only with the retained fact for that same scheduled contradiction. Still fail contradictions against immutable sharedEvent facts, employee role, project, actor perspective, assigned rating stance, or unrelated retained facts.',
           'If policyDecision.quality is low or policyDecision.specificity is vague, a vague or general response is correct and a detailed high-quality response should fail if it violates mustAvoid.',
           'pass must be true only if the response directly answers the latest Partner AI prompt and follows the active maneuver or responsePlan.',
           'If the active maneuver says partial-answer or responsePlan mode partial, do not require all quality criteria. Judge only whether the requested partial criterion is answered.',
@@ -1392,10 +1406,7 @@ async function validateGeneratedResponse(llm, input, candidateResponse) {
     ],
     model: llm.judgeModel ?? llm.model,
     temperature: 0,
-    // Headroom above the 200-character reason/correction the prompt asks for, so
-    // an occasionally verbose verdict still lands as parsable JSON. 300 and then
-    // 500 both truncated mid-reason on perspective objections.
-    max_tokens: 700,
+    max_tokens: 600,
     response_format: { type: 'json_object' }
   });
 
@@ -1730,127 +1741,14 @@ function withBehaviorValidation(result, behaviorCheck = {}) {
   };
 }
 
-// A single explicit statement of who the synthetic user is and which grammatical
-// person they must write in. Passed verbatim to the QA judge so it never has to infer
-// perspective from actorRole ("requestor"/"participant") or from the neutral
-// third-person wording of scenarioContext facts ("The employee has requested ...").
-// Both branches are stated with equal force: a correct employee_self_assessment
-// response is first person and must not be pushed toward a manager voice.
-export function actorPerspectiveContract(actorPerspective) {
-  if (actorPerspective === 'manager_evaluating_employee') {
-    return {
-      actorPerspective: 'manager_evaluating_employee',
-      domainRole: 'manager',
-      speaksAs: 'the manager, evaluating a separate person (the employee)',
-      requiredGrammaticalPerson: 'third person about the employee ("the employee", "they", or the employee name)',
-      correctVoiceExample: 'The employee exceeded the renewal target and protected the enterprise book.',
-      violationLooksLike: 'The synthetic user describes the employee\'s job, performance, development need, or compensation as their own ("my performance", "my raise").',
-      firstPersonAboutOwnWorkIsCorrect: false,
-      note: 'Third person about the employee is REQUIRED and CORRECT here. Never fail this response for not being written in first person.'
-    };
+function resolveActorPerspective({ actorRole, actorPersona, scriptedMode }) {
+  if (actorPersona === 'employee') return 'employee_self_assessment';
+  if (actorPersona === 'manager') return 'manager_evaluating_employee';
+  // Backward-compatible fallback for older configs and direct script calls.
+  if (scriptedMode) {
+    return actorRole === 'participant' ? 'employee_self_assessment' : 'manager_evaluating_employee';
   }
-  return {
-    actorPerspective: 'employee_self_assessment',
-    domainRole: 'employee',
-    speaksAs: 'the employee, speaking about their own work, their own performance, and their own compensation',
-    requiredGrammaticalPerson: 'first person about themselves ("I", "my", "me")',
-    correctVoiceExample: 'I exceeded my renewal target and protected the enterprise book, so I am asking for a 12% increase effective next quarter.',
-    violationLooksLike: 'The synthetic user talks about "the employee" as a separate third party they are evaluating, instead of speaking as that employee.',
-    firstPersonAboutOwnWorkIsCorrect: true,
-    note: 'First person about the synthetic user\'s own work and compensation is REQUIRED and CORRECT here. Never fail this response for not being written in third person and never ask it to speak as a manager evaluating the employee.'
-  };
-}
-
-// Marker-based classification of which voice a response is actually written in.
-// Used both to hard-fail genuine perspective swaps and to positively confirm that a
-// judge's perspective complaint is unfounded before overriding it.
-const SELF_VOICE_MARKERS = /\b(?:my role|my performance|my work|my own|my development|my manager|my salary|my raise|my base|my current|my goals?|my priorities|my portfolio|my contributions?|my request|i manage|i deliver(?:ed)?|i led|i am responsible|i'm responsible|i improved|i reduced|i exceeded|i achieved|i need|i would benefit|i propose|i suggest|i'm asking|i am asking|i'm requesting|i am requesting)\b/gi;
-const EVALUATOR_VOICE_MARKERS = /\b(?:the employee|this employee|employee's|their role|their performance|their work|their development|as (?:the|their) manager|in my view as (?:the|their) manager|they (?:demonstrated?|struggled?|delivered?|need|require|show)s?)\b/gi;
-
-export function classifyResponseVoice(value) {
-  const text = String(value ?? '');
-  const self = (text.match(SELF_VOICE_MARKERS) ?? []).length;
-  const evaluator = (text.match(EVALUATOR_VOICE_MARKERS) ?? []).length;
-  if (self === 0 && evaluator === 0) return { voice: 'unknown', self, evaluator };
-  if (self > evaluator) return { voice: 'employee', self, evaluator };
-  if (evaluator > self) return { voice: 'manager', self, evaluator };
-  return { voice: 'ambiguous', self, evaluator };
-}
-
-// Deterministic, symmetric perspective guard. Returns null unless the response is
-// clearly written in the OTHER actor's voice. Deliberately conservative: it requires
-// positive evidence of the wrong voice, never a mere absence of the right one.
-export function detectPerspectiveViolation(actorPerspective, candidateResponse) {
-  const contract = actorPerspectiveContract(actorPerspective);
-  const { voice } = classifyResponseVoice(candidateResponse);
-  if (contract.domainRole === 'manager' && voice === 'employee') {
-    return {
-      pass: false,
-      reason: 'The response speaks as the employee about their own work instead of as the manager evaluating the employee.',
-      correction: 'Rewrite from the manager perspective. Refer to the employee as the employee, they, or by the synthetic employee name; do not describe the manager as having the employee performance, development need, or compensation.'
-    };
-  }
-  if (contract.domainRole === 'employee' && voice === 'manager') {
-    return {
-      pass: false,
-      reason: 'The response speaks as a manager evaluating a separate employee instead of as the employee describing their own work.',
-      correction: 'Rewrite in first person as the employee. Say "I" and "my" about your own work, performance, and compensation; do not refer to yourself as "the employee" or evaluate someone else.'
-    };
-  }
-  return null;
-}
-
-// The judge is an LLM and can still hallucinate a perspective failure (e.g. reading the
-// neutral third-person scenario facts as proof the speaker must be a manager). When it
-// fails a response on perspective grounds but the response is positively confirmed to be
-// in the required voice, the verdict is wrong: downgrade it to a recorded warning rather
-// than aborting the case.
-const PERSPECTIVE_FAILURE_PATTERN = /perspective|first[- ]person|third[- ]person|actorperspective|speak(?:s|ing)? as (?:the|a) (?:employee|manager)|from (?:a|the) manager|from (?:the|an) employee/i;
-
-export function guardPerspectiveVerdictForTest(result, input, candidateResponse) {
-  return guardPerspectiveVerdict(result, input, candidateResponse);
-}
-
-function guardPerspectiveVerdict(result, input, candidateResponse) {
-  if (result?.pass !== false) return result;
-  if (!PERSPECTIVE_FAILURE_PATTERN.test(String(result.reason ?? ''))) return result;
-  if (detectPerspectiveViolation(input.actorPerspective, candidateResponse)) return result;
-  const contract = actorPerspectiveContract(input.actorPerspective);
-  const { voice } = classifyResponseVoice(candidateResponse);
-  // Manager-side special case: an impersonal answer about the project ("The
-  // quality issues caused rework...") carries no voice markers at all, so the
-  // marker-based classifier returns 'unknown' and the positive-evidence bar
-  // above can never clear. But speaking "as the employee" is impossible without
-  // first-person pronouns — if the response has none, any perspective objection
-  // is unfounded regardless of marker counts.
-  const hasFirstPerson = /\b(?:i|i'm|i've|i'd|me|my|mine|myself)\b/i.test(candidateResponse);
-  const impersonalManagerResponse = contract.domainRole === 'manager' && !hasFirstPerson;
-  if (voice !== contract.domainRole && !impersonalManagerResponse) return result;
-  return {
-    ...result,
-    pass: true,
-    reason: `Judge raised a perspective objection that does not hold: the response is already in the required ${contract.domainRole} voice for ${contract.actorPerspective}.`,
-    warnings: [
-      ...(result.warnings ?? []),
-      {
-        type: 'perspective_verdict_override',
-        passed: false,
-        expected: `Judge should accept ${contract.requiredGrammaticalPerson} for ${contract.actorPerspective}.`,
-        observed: `Overrode a false perspective rejection. Judge reason: ${String(result.reason ?? '').slice(0, 300)}`
-      }
-    ]
-  };
-}
-
-function resolveActorPerspective({ actorRole, requestorRole }) {
-  // Perspective follows the domain role the actor holds (employee → first-person
-  // self-assessment, manager → third-person evaluation of the employee), driven by the
-  // per-topic requestorRole rather than a fixed requestor=employee assumption. The
-  // redesigned Common Ground creates cases from the manager's side, so which actor is the
-  // employee depends on the case type / run config. This mirrors the actor->dossier
-  // mapping in scenarioController.js and the scripted answer mapping in scriptedAnswers.js,
-  // all routed through src/roleMapping.js.
-  return perspectiveForDomainRole(domainRoleForActor(actorRole, requestorRole));
+  return actorRole === 'participant' ? 'manager_evaluating_employee' : 'employee_self_assessment';
 }
 
 function questionRequiresExplicitScenarioRating(input) {
@@ -1879,6 +1777,7 @@ function responseMatchesRating(response, ratingId) {
   const signalPatterns = {
     unsatisfactory: [
       /\b(?:serious|material|significant|substantial|persistent|repeated) (?:gap|gaps|shortfall|shortfalls|problem|problems|failure|failures)\b/,
+      /\b(?:errors?|incomplete detail|rework|fixes|corrections?|quality issues?)\b/,
       /\b(?:inconsistent|unreliable|insufficient|inadequate|ineffective|poorly|missed|delayed|failed)\b/,
       /\b(?:required|requires|needed|needs) (?:frequent |substantial |continued )?(?:manager )?(?:intervention|correction|oversight|support)\b/,
       /\b(?:favorable|positive) (?:evidence|result|results|improvement) (?:is|was|remains?) (?:not |still not )?(?:enough|sufficient|consistent)\b/
@@ -1917,7 +1816,7 @@ function responseContradictsRating(response, ratingId) {
     exceeds_expectations: /\b(?:unsatisfactory|materially below expectations|does not meet expectations|well below expectations)\b/,
     meets_expectations: /\b(?:unsatisfactory|materially below expectations|well below expectations|outstanding|exceptional performance|significantly exceeds expectations)\b/,
     needs_improvement: /\b(?:outstanding|exceptional performance|significantly exceeds expectations|consistently surpasses expectations)\b/,
-    unsatisfactory: /\b(?:meets? (?:the )?(?:standard |normal |role )?expectations?|satisfactory|outstanding|exceptional performance|significantly exceeds (?:the )?(?:standard |normal |role )?expectations?|consistently surpasses expectations|performance is above expectations)\b/
+    unsatisfactory: /\b(?:meets? (?:the )?(?:normal |role )?expectations?|satisfactory|outstanding|exceptional performance|significantly exceeds (?:the )?(?:standard |normal |role )?expectations?|consistently surpasses expectations|performance is above expectations)\b/
   };
   return contradictions[ratingId]?.test(response) ?? false;
 }
@@ -2100,7 +1999,7 @@ function getHeuristicWarning(input, response) {
 
 function parseValidationResult(rawText) {
   try {
-    const parsed = JSON.parse(rawText);
+    const parsed = JSON.parse(extractJsonObjectText(rawText));
     return {
       pass: Boolean(parsed.pass),
       reason: String(parsed.reason ?? ''),
@@ -2132,6 +2031,17 @@ function parseValidationResult(rawText) {
       correction: 'Rewrite the response to directly answer the latest Partner AI prompt in a concise complete answer.'
     };
   }
+}
+
+function extractJsonObjectText(rawText) {
+  const text = String(rawText ?? '').trim();
+  if (text.startsWith('{')) return text;
+  const fenced = text.match(/```(?:json)?\s*({[\s\S]*?})\s*```/i);
+  if (fenced) return fenced[1];
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) return text.slice(firstBrace, lastBrace + 1);
+  return text;
 }
 
 function responseTokenBudget(input, isRetry = false) {

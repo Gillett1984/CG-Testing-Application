@@ -307,6 +307,11 @@ function sanitizeRunConfig(runConfig) {
     existingCaseId,
     factRatingStage: String(runConfig.factRatingStage ?? 'participant_rates_requestor'),
     workflowScope: runModeToWorkflowScope(runMode),
+    interviewStartActor: normalizeInterviewStartActor(runConfig.interviewStartActor),
+    dossierMode: normalizeDossierMode(runConfig.dossierMode),
+    dossierVariationPrompt: String(runConfig.dossierVariationPrompt ?? '').trim(),
+    screenshotMode: normalizeScreenshotMode(runConfig.screenshotMode),
+    reuseAuthState: runConfig.reuseAuthState !== false,
     testObjective: String(runConfig.testObjective ?? ''),
     testBehaviorPolicy: '',
     alignmentScenarioId: String(runConfig.alignmentScenarioId ?? ''),
@@ -319,6 +324,23 @@ function sanitizeRunConfig(runConfig) {
     qualityCriteriaPath: String(runConfig.qualityCriteriaPath ?? criteriaPathForCaseType(runConfig.caseType ?? runConfig.topic)),
     scriptedAnswersPath: sanitizeScriptedAnswersPath(runConfig.scriptedAnswersPath)
   };
+}
+
+function normalizeInterviewStartActor(value) {
+  const raw = String(value ?? 'employee').trim().toLowerCase();
+  return raw === 'manager' ? 'manager' : 'employee';
+}
+
+function normalizeDossierMode(value) {
+  const raw = String(value ?? 'fresh').trim().toLowerCase();
+  if (raw === 'auto' || raw === 'cached') return raw;
+  return 'fresh';
+}
+
+function normalizeScreenshotMode(value) {
+  const raw = String(value ?? 'failures_only').trim().toLowerCase();
+  if (raw === 'all' || raw === 'none') return raw;
+  return 'failures_only';
 }
 
 function criteriaPathForCaseType(caseType) {

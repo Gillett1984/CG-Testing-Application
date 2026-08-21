@@ -20,48 +20,35 @@ async function main() {
   if (config.run.runMode === 'full_workflow') {
     console.log(`Alignment scenario: ${config.run.alignmentScenarioId}`);
     console.log(`Behavior schedule: ${config.run.behaviorSchedule?.name ?? config.run.behaviorSchedulePath}`);
+    console.log(`Interview starts with: ${config.run.interviewStartActor}`);
+    console.log(`Scenario dossier mode: ${config.run.dossierMode}`);
+    if (config.run.dossierVariationPrompt) console.log(`Scenario dossier variation: ${config.run.dossierVariationPrompt}`);
+    console.log(`Screenshots: ${config.run.screenshotMode}`);
+    console.log(`Reuse auth state: ${config.run.reuseAuthState ? 'yes' : 'no'}`);
     console.log(`Post-processing wait: ${Math.round(config.run.postCompletionWaitMs / 60000)} minutes per stage`);
   }
   if (config.run.existingCaseId) console.log(`Existing case ID: ${config.run.existingCaseId}`);
   if (config.run.runMode === 'fact_labeling_smoke') console.log(`Fact labeling stage: ${config.run.factRatingStage}`);
   if (config.run.scriptedAnswersPath) console.log(`Scripted answers: ${config.run.scriptedAnswersPath} (behaviors disabled)`);
 
-  let summary = resumeRunId ? await store.readJson('summary.json') : null;
-  const resuming = Boolean(summary && Array.isArray(summary.cases));
-  if (!resuming) {
-    summary = {
-      runId: store.runId,
-      startedAt: new Date().toISOString(),
-      topic: config.run.topic,
-      caseType: config.run.caseType,
-      runMode: config.run.runMode,
-      existingCaseId: config.run.existingCaseId,
-      workflowScope: config.run.workflowScope,
-      numberOfCases: config.run.numberOfCases,
-      stopOnFailure: config.run.stopOnFailure,
-      qualityCriteriaPath: config.run.qualityCriteriaPath,
-      scriptedAnswersPath: config.run.scriptedAnswersPath ?? null,
-      cases: []
-    };
-  }
-
-  const completedCaseNumbers = new Set(summary.cases.map((item) => item.caseNumber));
-  if (resuming) {
-    console.log(`Resuming run ${store.runId}: ${completedCaseNumbers.size} of ${config.run.numberOfCases} case(s) already recorded.`);
-  }
-
-  // Rewrite the batch rollups after every case so an interrupted run still has
-  // an up-to-date summary/report/CSV (R1). `final` marks the terminal write.
-  const persistSummary = async ({ final = false } = {}) => {
-    summary.finishedAt = new Date().toISOString();
-    const allRecorded = summary.cases.length >= config.run.numberOfCases;
-    const allPassed = summary.cases.length > 0 && summary.cases.every((item) => item.status === 'passed');
-    summary.status = (final || allRecorded)
-      ? (allRecorded && allPassed ? 'passed' : 'failed')
-      : 'in_progress';
-    await store.writeJson('summary.json', summary);
-    await store.writeText('run-report.txt', buildRunReport(config, summary));
-    await store.writeText('cases.csv', buildCasesCsv(summary));
+  const summary = {
+    runId: store.runId,
+    startedAt: new Date().toISOString(),
+    topic: config.run.topic,
+    caseType: config.run.caseType,
+    runMode: config.run.runMode,
+    existingCaseId: config.run.existingCaseId,
+    workflowScope: config.run.workflowScope,
+    interviewStartActor: config.run.interviewStartActor,
+    dossierMode: config.run.dossierMode,
+    dossierVariationPrompt: config.run.dossierVariationPrompt,
+    screenshotMode: config.run.screenshotMode,
+    reuseAuthState: config.run.reuseAuthState,
+    numberOfCases: config.run.numberOfCases,
+    stopOnFailure: config.run.stopOnFailure,
+    qualityCriteriaPath: config.run.qualityCriteriaPath,
+    scriptedAnswersPath: config.run.scriptedAnswersPath ?? null,
+    cases: []
   };
 
   for (let caseNumber = 1; caseNumber <= config.run.numberOfCases; caseNumber += 1) {
@@ -122,6 +109,11 @@ function buildRunReport(config, summary) {
     `Run Mode: ${formatRunMode(config.run.runMode)}`,
     `Existing Case ID: ${config.run.existingCaseId ?? ''}`,
     `Fact Labeling Stage: ${config.run.factRatingStage ?? ''}`,
+    `Interview Starts With: ${config.run.interviewStartActor ?? 'employee'}`,
+    `Scenario Dossier Mode: ${config.run.dossierMode ?? 'fresh'}`,
+    `Scenario Dossier Variation Prompt: ${config.run.dossierVariationPrompt ?? ''}`,
+    `Screenshots: ${config.run.screenshotMode ?? 'failures_only'}`,
+    `Reuse Auth State: ${config.run.reuseAuthState !== false ? 'yes' : 'no'}`,
     `Number Of Cases: ${config.run.numberOfCases}`,
     `Max Conversation Turns: ${config.run.maxTurns}`,
     `Batch Failure Behavior: ${config.run.stopOnFailure ? 'Stop on failure' : 'Continue batch'}`,

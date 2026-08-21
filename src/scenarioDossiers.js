@@ -1,41 +1,6 @@
 const PROMPT_LEAK_PATTERN = /\b(assigned rating|scenario requirement|test requirement|synthetic (?:test|data)|dossier|system prompt|user prompt)\b/i;
 
-// Deterministic, caseNumber-keyed sector rotation. Not sourced from store.runId or
-// scenarioSeed. Pushes the invented role/industry/company away from the LLM's
-// default office/software roles that were repeating across cases.
-const ROLE_DOMAINS = [
-  'healthcare and clinical services',
-  'warehousing and logistics',
-  'hospitality and food service',
-  'manufacturing and skilled trades',
-  'education and training',
-  'financial services and insurance',
-  'agriculture and food production',
-  'retail and customer service',
-  'construction and infrastructure',
-  'nonprofit and community services',
-  'media, publishing, and creative production',
-  'energy, utilities, and environmental services',
-  'transportation and field operations',
-  'public sector and administration'
-];
-
-function buildRoleDiversity({ caseNumber, persona }) {
-  if (!caseNumber && !persona) return null;
-  const index = (Math.max(1, Number(caseNumber) || 1) - 1) % ROLE_DOMAINS.length;
-  const sector = ROLE_DOMAINS[index];
-  const workplaceCharacter = persona?.polish === 'crude'
-    ? 'an informal, hands-on frontline, field, or trades workplace'
-    : persona?.polish === 'professional'
-    ? 'a formal professional, corporate, or knowledge-work workplace'
-    : 'any plausible workplace';
-  return {
-    directive: `Set this case in the ${sector} sector; lean toward ${workplaceCharacter}. Invent a specific, fresh job title and a fictional employer native to that sector, clearly different from generic office, software-engineering, or marketing-coordinator roles used in other cases.`,
-    input: { sector, workplaceCharacter }
-  };
-}
-
-export async function generateScenarioDossiers({ llm, topic, scenario, seed, completeJson, caseNumber, persona }) {
+export async function generateScenarioDossiers({ llm, topic, scenario, seed, variationPrompt = '', completeJson }) {
   if (!llm?.apiKey) throw new Error('OPENAI_API_KEY is required to generate scenario dossiers.');
   if (typeof completeJson !== 'function') throw new Error('A JSON completion function is required to generate scenario dossiers.');
 
@@ -57,6 +22,7 @@ export async function generateScenarioDossiers({ llm, topic, scenario, seed, com
         'Create a fresh, viewpoint-neutral evidence packet for one fictional workplace performance review.',
         'Return only valid JSON.',
         'The case must be original for this unique seed: invent a new role, goals, projects, events, and metrics.',
+        'If a variationRequest is supplied, use it only to vary the workplace role, project setting, metrics, or accomplishment pattern while preserving all required topic terms and scenario relationships.',
         'Do not invent an employee name. Set canonicalProfile.employeeName to "the employee".',
         'Do not write from either the employee or manager viewpoint and do not decide who is correct.',
         'For every performance term, include objective evidence that can independently support both the highest and lowest evaluation when those endpoints are requested.',
@@ -71,7 +37,7 @@ export async function generateScenarioDossiers({ llm, topic, scenario, seed, com
       input: {
         caseSeed: seed,
         actor: 'neutral',
-        roleDiversity: roleDiversity?.input ?? undefined,
+        variationRequest: cleanVariationPrompt(variationPrompt),
         topic: topicInput,
         interpretiveRangeNeeded: pairRatings(employeeRatings, managerRatings),
         requiredShape: evidencePacketShapeDescription()
@@ -157,6 +123,10 @@ export async function generateScenarioDossiers({ llm, topic, scenario, seed, com
     }
   }
   throw new Error(`manager scenario dossier generation failed pairwise validation after retry: ${pairIssue}`);
+}
+
+function cleanVariationPrompt(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, 1000);
 }
 
 async function generateScenarioExpressionPlan({ llm, completeJson, topic, topicInput, scenario, seed, evidencePacket, employeeRatings, managerRatings, expressionRequirements }) {
