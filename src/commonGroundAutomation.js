@@ -1061,22 +1061,38 @@ async function acceptInvitationAndConfirm(page, config, createdCase, store) {
 
 // Report whether the case shows as accepted (Active) on the dashboard — its card no longer
 // offers "Review Invitation" and now offers "Getting Started".
+//
+// Anchored to the case's own CG-id, never to a case-type alias: with several
+// same-type cases on the dashboard, an alias-matched heading finds whichever
+// card renders first (observed on CG-0062: four older Active "Project Review"
+// cards made a still-pending case verify as accepted, masking a missed click).
 async function caseIsActive(page, config, createdCase) {
   await ensureOnDashboard(page, config);
   await waitForDiscussionsLoaded(page);
-  return page.evaluate((targets) => {
-    const heading = [...document.querySelectorAll('h1,h2,h3,h4')]
-      .find((h) => targets.some((t) => t && h.innerText.includes(t)));
-    let node = heading;
+  const caseId = createdCase?.commonGroundId ?? createdCase?.id ?? '';
+  if (!caseId) return false;
+  return page.evaluate((id) => {
+    const marker = [...document.querySelectorAll('*')]
+      .find((el) => !el.children.length && (el.textContent || '').toUpperCase().includes(id.toUpperCase()));
+    let node = marker;
     for (let i = 0; i < 8 && node; i += 1) {
       const text = node.innerText || '';
-      if (/CG-\d+/.test(text) && /(Manager:|Employee:)/.test(text)) {
-        return /\bActive\b/i.test(text) || /Getting Started/i.test(text);
+      // The first ancestor carrying the party labels is the case's own card.
+      if (/(Manager:|Employee:)/.test(text)) {
+        // Acceptance is proved by the card having moved PAST the invitation —
+        // not by the word "Active" (the redesign labels a case Active from
+        // creation) and not by this actor owning the next step: after
+        // accepting, the participant card reads "Next Up: Rabia shares their
+        // perspective", because the requestor goes first (CG-0095).
+        if (/Review Invitation/i.test(text)) return false;
+        const nextUp = (text.match(/Next(?: Up)?:\s*([^\n]*)/i) || ['', ''])[1];
+        if (/invitation/i.test(nextUp)) return false;
+        return /Next(?: Up)?:/i.test(text) || /Getting Started|Begin Discussion/i.test(text);
       }
       node = node.parentElement;
     }
     return false;
-  }, caseSearchTargets(createdCase));
+  }, caseId);
 }
 
 // The dashboard fetches its discussions after network-idle, showing "Loading discussions…"
@@ -1092,6 +1108,18 @@ async function waitForDiscussionsLoaded(page, timeoutMs = 90000) {
     const text = await readVisibleBodyText(page);
     if (!isDashboardPage(page.url(), text)) return;
     if (!/Loading discussions/i.test(text) && /(CG-\d+|Waiting for a Discussion)/i.test(text)) return;
+    await page.waitForTimeout(500);
+  }
+}
+
+// Case-detail twin of waitForDiscussionsLoaded: the detail page shows "Loading
+// discussion details..." while it fetches, so action lookups can race the fetch.
+// Returns as soon as the loading state clears; the cap only bounds a hung load.
+async function waitForCaseDetailLoaded(page, timeoutMs = 90000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const text = await readVisibleBodyText(page);
+    if (!/Loading discussion details|Loading discussions/i.test(text)) return;
     await page.waitForTimeout(500);
   }
 }
@@ -1118,7 +1146,16 @@ async function startGettingStarted(page, config, createdCase) {
   await ensureOnDashboard(page, config);
   await openCaseFromDashboard(page, createdCase, config.run.caseType);
   await waitForIdle(page);
-  if (await clickGettingStartedAction(page)) return;
+  // The case detail page hydrates after navigation ("Loading discussion
+  // details..." meanwhile), and the action can render a beat after the loading
+  // state clears — a single fast probe races both (observed on CG-0060: the
+  // action was reported missing while the page still said it was loading).
+  await waitForCaseDetailLoaded(page);
+  const actionDeadline = Date.now() + 30000;
+  while (Date.now() < actionDeadline) {
+    if (await clickGettingStartedAction(page)) return;
+    await page.waitForTimeout(1000);
+  }
 
   const dump = await dumpOpenCaseFailure(page, createdCase);
   throw new Error(
@@ -1269,6 +1306,15 @@ async function runPartnerAiInterviewTurns(page, config, transcript, options = {}
   // Loop-guard state: detect Partner AI re-asking the same question verbatim.
   let lastLoopGuardQuestion = null;
   let repeatedPromptCount = 0;
+  // Windowed twin of the consecutive guard: an app loop can ALTERNATE between two
+  // prompts (observed on staging: "I noticed you skipped 1 question(s)..." ↔ the
+  // re-asked primary question, with the skipped flag never clearing despite
+  // QoR-High answers), so no prompt ever repeats consecutively. Track the recent
+  // prompts and abort when any one question recurs 3 times within the window. A
+  // healthy interview re-asks a question at most twice inside 8 turns (original
+  // ask + one skipped-item revisit).
+  const recentLoopGuardQuestions = [];
+  const LOOP_GUARD_WINDOW = 8;
   // Secondary bound: consecutive turns spent on one primary question.
   let lastPrimaryQuestion = null;
   let samePrimaryCount = 0;
@@ -1326,6 +1372,18 @@ async function runPartnerAiInterviewTurns(page, config, transcript, options = {}
         await page.screenshot({ path: `${options.runDir}/prompt-loop-${slug}.png`, fullPage: true }).catch(() => {});
       }
       throw new PromptLoopError(loopGuardQuestion, repeatedPromptCount);
+    }
+    recentLoopGuardQuestions.push(loopGuardQuestion);
+    if (recentLoopGuardQuestions.length > LOOP_GUARD_WINDOW) recentLoopGuardQuestions.shift();
+    const windowRepeats = recentLoopGuardQuestions
+      .filter((question) => isSameRepeatedPrompt(question, loopGuardQuestion)).length;
+    if (windowRepeats >= 3) {
+      console.log(`[loop-guard] Same prompt recurred ${windowRepeats} times within ${LOOP_GUARD_WINDOW} turns (alternating loop) — aborting to avoid infinite loop.`);
+      const slug = String(options.actorRole ?? 'actor').toLowerCase().replace(/\s+/g, '-');
+      if (options.runDir) {
+        await page.screenshot({ path: `${options.runDir}/prompt-loop-${slug}.png`, fullPage: true }).catch(() => {});
+      }
+      throw new PromptLoopError(loopGuardQuestion, windowRepeats);
     }
 
     // Secondary bound, preserving the original intent now that the primary question no
@@ -1502,6 +1560,19 @@ async function runPartnerAiInterviewTurns(page, config, transcript, options = {}
 
     await responseInput.fill(response);
     await click(page, config.selectors.partnerAi.sendButton, 'Partner AI send');
+    // Verify the send actually happened: the app clears the input on success.
+    // A click landing during a re-render can silently miss (observed on
+    // CG-0082: the full response sat in the textarea, Partner AI never
+    // replied, and the stall guard aborted the interview). Retry while the
+    // text remains in the box.
+    for (let sendAttempt = 1; sendAttempt <= 3; sendAttempt += 1) {
+      await page.waitForTimeout(1500);
+      const residual = await responseInput.inputValue().catch(async () =>
+        responseInput.evaluate((el) => el.value ?? el.textContent ?? '').catch(() => ''));
+      if (!String(residual ?? '').trim()) break;
+      console.warn(`[interview] Send attempt ${sendAttempt} left the response in the input; clicking send again.`);
+      await click(page, config.selectors.partnerAi.sendButton, 'Partner AI send (retry)');
+    }
     // Anchor the next prompt read to this answer: the following turn must not read the
     // page until Partner AI has posted something after it.
     lastSubmittedResponse = response;
@@ -1845,15 +1916,39 @@ async function waitForPostProcessing(page, config) {
 }
 
 async function labelFactStatements(page, config, labelText) {
+  // Instrumented so the cost of this step can be attributed rather than guessed:
+  // waiting for Common Ground to extract and render the statements is its time,
+  // clicking through them is ours. Reported per actor in the run log.
+  const startedAt = Date.now();
   await waitForFactLabelingReady(page, config, labelText);
+  const readyAt = Date.now();
   if (await factStatementsAlreadySubmitted(page)) {
     console.log('[fact-labels] Statements are already labelled and submitted; moving on without re-rating.');
     return;
   }
   const labelingUrl = page.url();
+  const statementCount = await countFactStatements(page);
   await selectAllFactStatementLabels(page, config, labelText);
+  const labelledAt = Date.now();
   await submitFactStatementRatings(page);
   await verifyFactStatementSubmission(page, labelingUrl);
+  const doneAt = Date.now();
+  const secs = (from, to) => ((to - from) / 1000).toFixed(1);
+  console.log(
+    `[fact-labels] ${statementCount || 'unknown'} statement(s) | waiting for the app to render them ${secs(startedAt, readyAt)}s`
+    + ` | labelling ${secs(readyAt, labelledAt)}s | submit+verify ${secs(labelledAt, doneAt)}s`
+    + ` | total ${secs(startedAt, doneAt)}s`
+  );
+}
+
+// Number of statements the labelling screen is showing, from its own counter.
+async function countFactStatements(page) {
+  return page.evaluate(() => {
+    const text = String(document.body?.innerText ?? '').replace(/\s+/g, ' ');
+    const counter = text.match(/(\d+)\s*\/\s*(\d+)\s+labell?ed/i);
+    if (counter) return Number(counter[2]);
+    return (text.match(/Statement\s+\d+/gi) ?? []).length || null;
+  }).catch(() => null);
 }
 
 // How long an "already finished" reading must hold before a wait accepts it and moves on.
@@ -1881,6 +1976,19 @@ async function completeActorPostProcessing(page, config, artifacts, actorLabel, 
   // Discussion Details does not auto-advance: it parks on a status list with a
   // "Next: <step>" link, and the step page only opens when that link is clicked. Without this
   // the wait below polls for a step screen that will never appear on its own (CG-0004).
+  // The page can arrive here still on the dashboard — a resumed run logs in
+  // fresh, and a hand-off can land there too. The dashboard carries no step
+  // links, so openPendingWorkflowStep would find nothing and the wait below
+  // would poll it forever (CG-0098, resumed at participant_facts). Open the
+  // case first so the pending step is reachable.
+  if (isDashboardPage(page.url(), await readVisibleBodyText(page))) {
+    const opened = await openCaseDetailsFromDashboard(page, artifacts.case, config.run.caseType)
+      .then(() => true).catch(() => false);
+    if (opened) {
+      await waitForIdle(page);
+      console.log(`[workflow] ${actorLabel}: opened ${artifacts.case?.commonGroundId ?? 'the case'} from the dashboard before resolving the pending step.`);
+    }
+  }
   await openPendingWorkflowStep(page);
 
   // Nothing left for this actor: every one of their steps in the status list is already
@@ -1898,8 +2006,9 @@ async function completeActorPostProcessing(page, config, artifacts, actorLabel, 
   }
 
   const firstState = await waitForWorkflowState(page, config, {
-    name: `${actorLabel.toLowerCase()} clarify context, excerpt review or fact statement labeling`,
+    name: `${actorLabel.toLowerCase()} clarify context, missing perspective, excerpt review or fact statement labeling`,
     ready: (text, currentPage) => clarifyContextReady(text, currentPage.url())
+      || missingPerspectiveReady(text, currentPage.url())
       || excerptReviewReady(text, currentPage.url())
       || factLabelingReady(text, currentPage.url())
   });
@@ -1936,6 +2045,18 @@ async function completeActorPostProcessing(page, config, artifacts, actorLabel, 
         { extra: { work: outcome.work, submission: outcome.submission, unresolved: outcome.unresolved, contextItems: outcome.contextItems } }
       );
     }
+    await waitForWorkflowState(page, config, {
+      name: `${actorLabel.toLowerCase()} missing perspective, excerpt review or fact statement labeling`,
+      ready: (text, currentPage) => missingPerspectiveReady(text, currentPage.url())
+        || excerptReviewReady(text, currentPage.url())
+        || factLabelingReady(text, currentPage.url())
+    });
+  }
+
+  // "Add Missing Perspective" follows Clarify & Improve when the mediator found
+  // details the other party raised that this actor never covered.
+  if (missingPerspectiveReady(await readVisibleBodyText(page), page.url())) {
+    await completeMissingPerspectiveStep(page, artifacts, actorLabel);
     await waitForWorkflowState(page, config, {
       name: `${actorLabel.toLowerCase()} excerpt review or fact statement labeling`,
       ready: (text, currentPage) => excerptReviewReady(text, currentPage.url()) || factLabelingReady(text, currentPage.url())
@@ -2047,9 +2168,249 @@ async function skipClarifyContext(page, config, actorLabel = 'actor') {
 // Step pages reachable from the Discussion Details status list via its "Next: <step>" link.
 const PENDING_STEP_LINKS = [
   { name: /Add Helpful Details/i, route: /\/clarify-context/i },
+  { name: /Add Missing Perspective/i, route: /\/missing-perspective/i },
+  { name: /Confirm Your Additions/i, route: /\/(?:confirm-additions|new-evidence)/i },
   { name: /Review Your Excerpts/i, route: /\/excerpt-review/i },
   { name: /Rate (?:Your|[\w'’-]+'?s) Supporting Statements/i, route: /\/(?:fact-review|cross-rate)/i }
 ];
+
+function missingPerspectiveReady(text, url = '') {
+  const value = String(text ?? '');
+  if (/\/missing-perspective(?:[/?#]|$)/i.test(String(url ?? ''))) return true;
+  return /Missing Perspective Item\s*\d+/i.test(value) || /Nothing to add here/i.test(value);
+}
+
+// Leave the Add Missing Perspective step by whichever affordance the current
+// variant offers. The step has three presentations and only the first carries a
+// Continue button, so a single hard-coded exit strands the run on the others.
+// Returns a short label naming the exit used.
+async function leaveMissingPerspectiveStep(page) {
+  for (const [label, locator] of [
+    ['Continue', page.getByRole('button', { name: /^Continue$/i }).first()],
+    ['the Excerpt Review tab', page.getByRole('button', { name: /^Excerpt Review$/i }).first()],
+    ['the Excerpt Review link', page.getByRole('link', { name: /^Excerpt Review$/i }).first()]
+  ]) {
+    if (!await locator.isVisible({ timeout: 1500 }).catch(() => false)) continue;
+    if (!await locator.isEnabled({ timeout: 500 }).catch(() => false)) continue;
+    if (!await locator.click({ timeout: 5000 }).then(() => true).catch(() => false)) continue;
+    await page.waitForLoadState('networkidle').catch(() => {});
+    await page.waitForTimeout(1500);
+    return label;
+  }
+  // Last resort: navigate directly, so a missing tab strip cannot strand the run.
+  const direct = page.url().replace(/\/missing-perspective(?:[/?#].*)?$/i, '/excerpt-review');
+  if (direct !== page.url()) {
+    await page.goto(direct, { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForTimeout(1500);
+    return 'a direct URL';
+  }
+  return 'no available exit';
+}
+
+// "Add Missing Perspective" (route /missing-perspective) sits between Clarify &
+// Improve and Excerpt Review for the participant, and opens the requestor's
+// return visit before cross-rating. Cards are completed without inventing
+// content: answer "I Don't Know" (recorded by the app as
+// no_perspective_provided — per spec never treated as disagreement), then
+// Submit. Three presentations exist: "Waiting for the other party" (not yet
+// actionable), a zero-item state (either "Nothing to add here" with a Continue
+// button, or the populated layout showing "0/0 reviewed" with no control at
+// all), and real cards. Only the cards state has a Submit.
+async function completeMissingPerspectiveStep(page, artifacts, actorLabel) {
+  const deadline = Date.now() + 45000;
+  let mode = null;
+  while (Date.now() < deadline && !mode) {
+    await dismissTourOverlay(page, `${actorLabel} missing perspective`);
+    const text = await readVisibleBodyText(page);
+    const reviewedCounter = text.match(/(\d+)\s*\/\s*(\d+)\s+reviewed/i);
+    if (/Waiting for the other party/i.test(text)) mode = 'waiting';
+    else if (/Nothing to add here/i.test(text)) mode = 'empty';
+    // The prompt header can render with a 0/0 counter and no cards or Submit
+    // control — a zero-item step wearing the populated layout (CG-0087). It is
+    // the empty state in substance, so treat it as such instead of matching
+    // 'cards' on the counter alone and then finding nothing to click.
+    else if (reviewedCounter && reviewedCounter[2] === '0') mode = 'empty';
+    else if (/Missing Perspective Item\s*\d+/i.test(text)
+      || (/\/missing-perspective(?:[/?#]|$)/i.test(page.url()) && reviewedCounter)) mode = 'cards';
+    else await page.waitForTimeout(1000);
+  }
+
+  if (mode === 'waiting') {
+    // Not actionable for this actor yet: the comparison needs the other
+    // party's submitted review first. Leave via the tab strip so the actor's
+    // own remaining steps (Excerpt Review onward) can proceed; the
+    // cross-rating wait retries this step once it becomes ready.
+    console.log(`[missing-perspective] ${actorLabel}: waiting on the other party; leaving the step for later.`);
+    await leaveMissingPerspectiveStep(page);
+    return { handled: false, mode };
+  }
+
+  if (mode === 'empty') {
+    // Leave the step by whichever affordance this variant offers: the empty
+    // state has Continue, the 0/0 variant has neither Continue nor Submit and
+    // must be left via the tab strip, or the run stalls here (CG-0087).
+    const left = await leaveMissingPerspectiveStep(page);
+    console.log(`[missing-perspective] ${actorLabel}: zero items; left the step via ${left}.`);
+    artifacts?.softAssertions?.push({
+      type: 'missing_perspective_empty_state_unsubmittable',
+      passed: false,
+      expected: 'A zero-item Add Missing Perspective step completes (or auto-completes) so the workflow can advance.',
+      observed: `The zero-item step exposes no submit affordance (exited via ${left}); it relies on the backend auto-completing zero-item builds, otherwise the stage stays pending and gates cross-rating and the Alignment Brief.`
+    });
+    recordStage(artifacts, `${actorLabel} Missing Perspective`, 'passed', `Nothing to add (zero items); left via ${left}.`);
+    return { handled: true, mode };
+  }
+
+  if (mode === 'cards') {
+    recordStage(artifacts, `${actorLabel} Missing Perspective`, 'started');
+    let declined = 0;
+    // Spec caps items at 10; each "I Don't Know" disables after tapping.
+    for (let round = 0; round < 15; round += 1) {
+      const buttons = await page.getByRole('button', { name: /I Don'?t Know/i }).all();
+      let clicked = false;
+      for (const button of buttons) {
+        if (!await button.isVisible().catch(() => false)) continue;
+        if (!await button.isEnabled().catch(() => false)) continue;
+        await button.scrollIntoViewIfNeeded().catch(() => {});
+        if (await button.click({ timeout: 5000 }).then(() => true).catch(() => false)) {
+          declined += 1;
+          clicked = true;
+          await page.waitForTimeout(600);
+          break;
+        }
+      }
+      if (!clicked) break;
+    }
+    const submit = page.getByRole('button', { name: /^Submit$/i }).first();
+    let submitted = false;
+    if (await submit.isVisible({ timeout: 2000 }).catch(() => false)
+      && await submit.isEnabled({ timeout: 1000 }).catch(() => false)) {
+      submitted = await submit.click({ timeout: 10000 }).then(() => true).catch(() => false);
+      await page.waitForLoadState('networkidle').catch(() => {});
+      await page.waitForTimeout(2000);
+    }
+    // Never claim a submit that did not happen, and never leave the run parked
+    // on this step: if Submit was absent or the page stayed put, leave via the
+    // tab strip so the following steps can proceed.
+    const stillHere = /\/missing-perspective(?:[/?#]|$)/i.test(page.url());
+    const exit = stillHere ? await leaveMissingPerspectiveStep(page) : 'submit';
+    const detail = `${declined} item(s) answered "I Don't Know"; ${submitted ? 'submitted' : 'no Submit control was available'}`
+      + `${stillHere ? `, left the step via ${exit}` : ''}.`;
+    console.log(`[missing-perspective] ${actorLabel}: ${detail}`);
+    if (!submitted) {
+      artifacts?.softAssertions?.push({
+        type: 'missing_perspective_not_submitted',
+        passed: false,
+        expected: 'The Add Missing Perspective step offers a Submit control once its items are answered.',
+        observed: `${declined} item(s) answered but no enabled Submit control was present at ${page.url()}; the tool left via ${exit}.`
+      });
+    }
+    recordStage(artifacts, `${actorLabel} Missing Perspective`, 'passed', detail);
+    return { handled: true, mode, declined, submitted };
+  }
+
+  const slug = String(actorLabel ?? 'actor').toLowerCase().replace(/\s+/g, '-');
+  if (activeRunDir) {
+    await page.screenshot({ path: `${activeRunDir}/missing-perspective-unrecognized-${slug}.png`, fullPage: true }).catch(() => {});
+  }
+  artifacts?.softAssertions?.push({
+    type: 'missing_perspective_unrecognized',
+    passed: false,
+    expected: 'The Add Missing Perspective step renders cards or its empty state.',
+    observed: `Neither cards nor "Nothing to add here" appeared within 45s at ${page.url()}.`
+  });
+  return { handled: false, mode: 'unrecognized' };
+}
+
+// "Confirm Your Additions" sits between Missing Perspective and Rate the Other
+// Party's Statements on the requestor's return visit: perspectives they saved
+// become new evidence they must confirm, because unlike the participant they
+// have already finished Excerpt Review and would otherwise never see it.
+//
+// It renders even when there is nothing to confirm (every item answered "I
+// Don't Know" produces zero new evidence) and still requires an explicit
+// Continue. Skipping it leaves the rating step 409-gated, so the cross-rating
+// wait just refreshes until it times out — observed on CG-0088, where the step
+// had to be cleared by hand.
+async function completeConfirmAdditionsIfPresent(page, artifacts, actorLabel) {
+  const text = await readVisibleBodyText(page);
+  // "Confirm Your Additions" is ALSO a row label in the case detail page's
+  // status list, so matching the phrase alone finds the tracker rather than the
+  // step (CG-0089: it matched on the detail page, found no controls, and
+  // recorded a failure that blocked the Alignment Report). Require the step's
+  // own route, or a page that is not the detail page.
+  const onStepRoute = /\/(?:confirm-additions|new-evidence)(?:[/?#]|$)/i.test(page.url());
+  const onCaseDetail = /Discussion Details/i.test(text);
+  if (!onStepRoute && (onCaseDetail || !/Confirm Your Additions/i.test(text))) {
+    return { handled: false, mode: 'absent' };
+  }
+
+  // Confirm each pending addition first; the step will not advance while any
+  // remain. Nothing is invented — these are the user's own saved words.
+  let confirmed = 0;
+  for (let round = 0; round < 15; round += 1) {
+    const buttons = await page.getByRole('button', { name: /^(?:Confirm|Approve|Looks Good)$/i }).all();
+    let clicked = false;
+    for (const button of buttons) {
+      if (!await clickWhenActionable(button)) continue;
+      confirmed += 1;
+      clicked = true;
+      await page.waitForTimeout(700);
+      break;
+    }
+    if (!clicked) break;
+  }
+
+  let advanced = false;
+  for (const name of [/^Continue$/i, /^Submit(?:\s*&?\s*Continue)?$/i, /^Done$/i]) {
+    const control = page.getByRole('button', { name }).first();
+    if (!await clickWhenActionable(control)) continue;
+    await page.waitForLoadState('networkidle').catch(() => {});
+    await page.waitForTimeout(2000);
+    advanced = true;
+    break;
+  }
+
+  const detail = `${confirmed} addition(s) confirmed; ${advanced ? 'continued past the step' : 'no Continue control was available'}.`;
+  console.log(`[confirm-additions] ${actorLabel}: ${detail}`);
+  if (!advanced) {
+    // Recorded as a soft assertion, never a failed stage: this step is
+    // conditional (it only appears when saved perspectives became new
+    // evidence), and a failed stage here blocks the Alignment Report through
+    // assertNoBlockingStageFailure even when the rating step proceeds fine.
+    artifacts?.softAssertions?.push({
+      type: 'confirm_additions_not_advanced',
+      passed: false,
+      expected: 'The Confirm Your Additions step offers a Continue control so the workflow can reach the rating step.',
+      observed: `No enabled Continue control was found at ${page.url()} after confirming ${confirmed} addition(s).`
+    });
+    return { handled: false, confirmed };
+  }
+  recordStage(artifacts, `${actorLabel} Confirm Additions`, 'passed', detail);
+  return { handled: true, confirmed };
+}
+
+// Open and complete the Missing Perspective step when the current page offers
+// it (its tab/link, or already on its route). Returns { handled: false } when
+// the step is not reachable from here.
+async function completeMissingPerspectiveIfPresent(page, artifacts, actorLabel) {
+  if (!/\/missing-perspective(?:[/?#]|$)/i.test(page.url())) {
+    let opened = false;
+    for (const role of ['link', 'button']) {
+      const control = page.getByRole(role, { name: /Add Missing Perspective/i }).first();
+      if (!await control.isVisible({ timeout: 750 }).catch(() => false)) continue;
+      if (!await control.isEnabled({ timeout: 500 }).catch(() => false)) continue;
+      await control.scrollIntoViewIfNeeded().catch(() => {});
+      if (!await control.click({ timeout: 5000 }).then(() => true).catch(() => false)) continue;
+      opened = true;
+      break;
+    }
+    if (!opened) return { handled: false, mode: 'absent' };
+    await page.waitForLoadState('networkidle').catch(() => {});
+    await page.waitForTimeout(2000);
+  }
+  return completeMissingPerspectiveStep(page, artifacts, actorLabel);
+}
 
 // On the case detail page, open the step the app says is next. No-op when already on a step
 // route, so it is safe to call before any post-processing wait.
@@ -2436,8 +2797,28 @@ async function submitExcerptReview(page, config) {
       await submitState.control.scrollIntoViewIfNeeded().catch(() => {});
       await submitState.control.click();
       await page.waitForLoadState('networkidle').catch(() => {});
-      await page.waitForTimeout(1500);
-      return;
+      // Verify the submit actually landed before returning. An approval can
+      // silently revert server-side (observed on CG-0075: the bulk pass
+      // reported 59/59, the server kept one revised excerpt Unapproved, and
+      // the app blocked submission with "All excerpts must be approved before
+      // you can submit") — returning on the click alone strands the run one
+      // step later with an unrelated-looking timeout.
+      const exitDeadline = Date.now() + 20000;
+      let blocked = false;
+      while (Date.now() < exitDeadline) {
+        await page.waitForTimeout(1500);
+        const afterText = await readVisibleBodyText(page);
+        const afterCount = extractExcerptApprovalCount(afterText);
+        if (/must be approved before you can submit/i.test(afterText)
+          || (afterCount && afterCount.approved < afterCount.total)) {
+          blocked = true;
+          break;
+        }
+        if (!excerptReviewReady(afterText, page.url())) return;
+      }
+      if (!blocked) return;
+      console.log('[excerpt-review] Submit was blocked by an unapproved excerpt; re-running the approval pass.');
+      continue;
     }
 
     await page.waitForTimeout(1000);
@@ -2891,6 +3272,10 @@ async function completeCrossPartyFactReview(page, config, createdCase, labelText
   let gateSince = 0;
   let refreshes = 0;
   let lastRows = [];
+  // The requestor's return visit opens with their own Add Missing Perspective
+  // step (+ Confirm Additions when they saved perspectives); the rating stays
+  // 409-gated until it is done. Attempt it once from this wait.
+  let missingPerspectiveAttempted = false;
 
   while (Date.now() < deadline) {
     lastText = await readVisibleBodyText(page);
@@ -2899,6 +3284,26 @@ async function completeCrossPartyFactReview(page, config, createdCase, labelText
     if (factLabelingReady(lastText, lastUrl)) {
       await labelFactStatements(page, config, labelText);
       return;
+    }
+
+    if (!missingPerspectiveAttempted) {
+      const mpOutcome = await completeMissingPerspectiveIfPresent(page, options.artifacts, capitalizeFirst(options.raterRole ?? 'actor'));
+      // Only a completed step ends the attempts. 'waiting' (other party not
+      // done) and 'absent' must retry on later passes — the step becomes
+      // ready mid-wait once the counterparty submits their review.
+      if (mpOutcome.mode === 'empty' || mpOutcome.mode === 'cards') missingPerspectiveAttempted = true;
+      if (mpOutcome.handled) {
+        await page.waitForTimeout(1500);
+        continue;
+      }
+    }
+
+    // Interposed between Missing Perspective and the rating step; it can appear
+    // on any pass (right after the MP submit), so it is checked every time
+    // rather than latched like the MP attempt above.
+    if ((await completeConfirmAdditionsIfPresent(page, options.artifacts, capitalizeFirst(options.raterRole ?? 'actor'))).handled) {
+      await page.waitForTimeout(1500);
+      continue;
     }
 
     // Do not gate on one step's spinner. Common Ground can leave an earlier step in progress
@@ -4390,22 +4795,44 @@ async function selectCaseType(page, requestedType) {
   // The "Create a Request" page groups requests under tabs ("Discussion Request",
   // "Performance Review"), each containing cards (e.g. "Raise Request",
   // "Performance Review") with their own "Begin Request" button. Select the tab,
-  // then begin the request from the matching card.
-  await selectRequestTab(page, plan.tab);
-  await page.getByRole('button', { name: /Begin Request/i }).first()
-    .waitFor({ state: 'visible', timeout: 30000 })
-    .catch(() => {});
-  await clickRequestCardButton(page, plan.card);
+  // then begin the request from the matching card. Newer topics' card placement is
+  // frontend-owned (the backend's available-topics endpoint carries no display
+  // metadata), so a plan may list fallback tabs to search when the card is not on
+  // the preferred one. Only a card-not-found error moves to the next tab; a
+  // disabled or ambiguous card on the right tab must keep failing loudly.
+  const tabs = [plan.tab, ...(plan.fallbackTabs ?? [])];
+  let lastError;
+  for (const tab of tabs) {
+    await selectRequestTab(page, tab);
+    await page.getByRole('button', { name: /Begin Request/i }).first()
+      .waitFor({ state: 'visible', timeout: 30000 })
+      .catch(() => {});
+    try {
+      await clickRequestCardButton(page, plan.card);
+      return;
+    } catch (error) {
+      if (error?.code !== 'REQUEST_CARD_NOT_FOUND') throw error;
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
 
 function caseCreationPlan(requestedType) {
   const value = String(requestedType ?? '').toLowerCase();
+  // Project Review contains "review", so it must be resolved before the
+  // Performance Review family. Its card mirrors the performance topics but the
+  // tab is not documented anywhere backend-side, hence the fallback.
+  if (/project/.test(value)) {
+    return { tab: /Performance Review/i, card: 'Project Review', fallbackTabs: [/Discussion Request/i] };
+  }
   // Performance Review tab — select the specific variant card by its full title.
   if (/performance|review/.test(value)) {
     if (/90.?day/.test(value)) return { tab: /Performance Review/i, card: 'Performance Review - 90-Day' };
+    if (/focused|improvement/.test(value)) return { tab: /Performance Review/i, card: 'Performance Review - Focused Improvement' };
     if (/evaluation/.test(value)) return { tab: /Performance Review/i, card: 'Performance Review - Evaluation' };
     if (/coaching/.test(value)) return { tab: /Performance Review/i, card: 'Performance Review - Coaching' };
-    throw new Error(`Ambiguous case type "${requestedType}" — specify Coaching, Evaluation, or 90-Day.`);
+    throw new Error(`Ambiguous case type "${requestedType}" — specify Coaching, Evaluation, 90-Day, or Focused Improvement.`);
   }
   // Discussion Request tab cards.
   if (/remote/.test(value)) return { tab: /Discussion Request/i, card: 'Remote Work' };
@@ -4450,11 +4877,14 @@ async function clickRequestCardButton(page, cardTitle, buttonPattern = /Begin Re
   const outcome = await page.evaluate(({ target, btnSource, btnFlags }) => {
     const beginPattern = new RegExp(btnSource, btnFlags);
     const isDisabled = (element) => element.disabled || element.getAttribute('aria-disabled') === 'true';
-    // Normalize dash variants (en/em dash, minus) and whitespace so the config
-    // title ("- Coaching") matches the UI title ("– Coaching").
+    // Normalize separator variants and whitespace so the config title
+    // ("- Coaching") matches the UI title across redesigns: en/em dash
+    // ("– Coaching"), minus, and colon ("Performance Review: Focused
+    // Improvement" on the staging redesign) are all treated as " - ".
     const norm = (value) => String(value || '')
       .toLowerCase()
-      .replace(/[\u2010-\u2015\u2212]/g, '-')
+      .replace(/[\u2010-\u2015\u2212:]/g, '-')
+      .replace(/\s*-\s*/g, ' - ')
       .replace(/\s+/g, ' ')
       .trim();
     const raw = (value) => String(value || '').replace(/\s+/g, ' ').trim();
@@ -4555,7 +4985,9 @@ async function clickRequestCardButton(page, cardTitle, buttonPattern = /Begin Re
   }
 
   if (outcome.status !== 'clicked') {
-    throw new Error(`Could not begin the request: no "Begin Request" button found for the card "${cardTitle}". The Create a Request UI may have changed.`);
+    const notFound = new Error(`Could not begin the request: no "Begin Request" button found for the card "${cardTitle}". The Create a Request UI may have changed.`);
+    notFound.code = 'REQUEST_CARD_NOT_FOUND';
+    throw notFound;
   }
 
   console.log(`[create-case] Began request from the "${outcome.cardTitle}" card.`);
@@ -4684,7 +5116,13 @@ async function clickCaseCardButtonOnce(page, createdCase, buttonPattern) {
   await page.evaluate(({ targets, patternSource, patternFlags, requireExactCaseMatch }) => {
     const pattern = new RegExp(patternSource, patternFlags);
     const headings = [...document.querySelectorAll('h1,h2,h3')];
-    const targetHeading = headings.find((element) => targets.some((target) => element.innerText.includes(target)));
+    // Match by the case's own CG-id before falling back to case-type aliases:
+    // with several same-type cards on the dashboard, an alias matches whichever
+    // card renders first, which needn't be this case's.
+    const idTargets = targets.filter((target) => /^CG-\d+/i.test(target));
+    const aliasTargets = targets.filter((target) => !/^CG-\d+/i.test(target));
+    const findHeading = (list) => headings.find((element) => list.some((target) => target && element.innerText.includes(target)));
+    const targetHeading = findHeading(idTargets) ?? findHeading(aliasTargets);
     const heading = targetHeading
       ?? (requireExactCaseMatch ? null : headings.find((element) => /raise|performance review|case/i.test(element.innerText)));
     const globalButton = [...document.querySelectorAll('button,a,[role="button"]')]

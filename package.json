@@ -14,7 +14,8 @@
     "validate:workflow": "node scripts/validateFullWorkflow.js",
     "validate:fact-labeling": "node scripts/validateFactLabelingWorkflow.js",
     "validate:onboarding": "node scripts/validateTopicOnboarding.js",
-    "validate:scripted": "node scripts/validateScriptedAnswers.js"
+    "validate:scripted": "node scripts/validateScriptedAnswers.js",
+    "validate:replay": "node scripts/validateReplay.js"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
