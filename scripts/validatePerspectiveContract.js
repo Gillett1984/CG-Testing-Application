@@ -38,13 +38,9 @@ const EMPLOYEE_SPEAKING_AS_MANAGER = "The employee has met their renewal target 
 const MANAGER_SPEAKING_AS_EMPLOYEE = "My performance this year was strong. I exceeded my renewal target and I need a raise because my role expanded and my manager agreed the scope changed.";
 
 console.log('=== 1. Role mapping per topic ===');
-check('Raise (requestor=employee): requestor -> employee_self_assessment',
-  perspectiveForDomainRole(domainRoleForActor('requestor', 'employee')) === 'employee_self_assessment');
-check('Raise (requestor=employee): participant -> manager_evaluating_employee',
-  perspectiveForDomainRole(domainRoleForActor('participant', 'employee')) === 'manager_evaluating_employee');
-check('Performance Review (requestor=manager): requestor -> manager_evaluating_employee',
+check('All topics (requestor=manager): requestor -> manager_evaluating_employee',
   perspectiveForDomainRole(domainRoleForActor('requestor', 'manager')) === 'manager_evaluating_employee');
-check('Performance Review (requestor=manager): participant -> employee_self_assessment',
+check('All topics (requestor=manager): participant -> employee_self_assessment',
   perspectiveForDomainRole(domainRoleForActor('participant', 'manager')) === 'employee_self_assessment');
 
 console.log('\n=== 2. Judge contract wording ===');

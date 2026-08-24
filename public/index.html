@@ -43,9 +43,9 @@
           <label>
             <span>Workflow</span>
             <select id="runMode">
-              <option value="full_workflow">Full Requestor + Participant</option>
-              <option value="requestor_getting_started">Requestor Getting Started only</option>
-              <option value="participant_getting_started">Participant Getting Started only</option>
+              <option value="full_workflow">Full Manager + Employee Workflow</option>
+              <option value="requestor_getting_started">Manager Share Your Perspective only (legacy)</option>
+              <option value="participant_getting_started">Employee Share Your Perspective only (existing Discussion)</option>
               <option value="fact_labeling_smoke">Fact Labeling Smoke Test</option>
             </select>
           </label>
@@ -56,10 +56,10 @@
           <label id="factRatingStageField" hidden>
             <span>Fact Labeling Stage</span>
             <select id="factRatingStage">
-              <option value="requestor_own">Requestor labels own facts</option>
-              <option value="participant_rates_requestor">Participant rates Requestor facts</option>
-              <option value="participant_own">Participant labels own facts</option>
-              <option value="requestor_rates_participant">Requestor rates Participant facts</option>
+              <option value="requestor_own">Manager labels own statements</option>
+              <option value="participant_rates_requestor">Employee rates Manager supporting statements</option>
+              <option value="participant_own">Employee labels own statements</option>
+              <option value="requestor_rates_participant">Manager rates Employee supporting statements</option>
             </select>
           </label>
           <label>

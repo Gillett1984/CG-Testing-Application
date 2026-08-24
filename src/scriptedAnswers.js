@@ -19,11 +19,9 @@ export function loadScriptedAnswers(rootDir, relativePath) {
   return scriptedAnswersSchema.parse(raw);
 }
 
-// Scripted-answer files are keyed by domain role (`employee` / `manager`), which is
-// invariant to who created the case. Which actor speaks each answer depends on the
-// per-topic requestorRole: the redesigned Common Ground creates Performance Review from
-// the manager's side (requestor = manager), while a Raise is employee-initiated
-// (requestor = employee). The routing lives in src/roleMapping.js.
+// Scripted-answer files are keyed by domain role (`employee` / `manager`). Common Ground
+// Discussions are manager-created, so requestor=manager and participant=employee in the
+// canonical workflow. requestorRole remains an argument for replaying older artifacts.
 function actorAnswerKey(actorRole, requestorRole) {
   return domainRoleForActor(actorRole, requestorRole); // 'employee' | 'manager'
 }

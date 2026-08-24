@@ -11,6 +11,7 @@
     "participantEmailInput": "input[type=\"email\"]",
     "employeeNameInput": "#party1-name",
     "employeeEmailInput": "#party1-email",
+    "employeeSelect": "#counterpart-picker",
     "managerSelect": "#party2-participant",
     "createCaseButton": "button[type=\"submit\"]",
     "caseHeading": "h1, h2, h3",

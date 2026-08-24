@@ -4,6 +4,7 @@ import { buildSyntheticCase } from './syntheticData.js';
 import { generatePartnerAiResponse, generateScenarioDossiers, verifyOpenAiConnectivity } from './llmResponder.js';
 import { extractPromptContext } from './promptContext.js';
 import { WORKFLOW_PHASES } from './workflowPhases.js';
+import { assertWorkflowLedgerComplete, createWorkflowLedger, updateWorkflowLedger } from './canonicalWorkflow.js';
 import { evaluateManeuverSuccess, evaluatePolicyAdvanceStop, findActiveManeuver } from './testManeuvers.js';
 import { createScenarioController } from './scenarioController.js';
 import { matchScenarioQuestion, matchScenarioQuestionScored, matchScenarioCriterion, textSimilarity } from './questionMatching.js';
@@ -42,7 +43,8 @@ export async function runAutomation(config, store, options = {}) {
       participantGettingStarted: participantTranscript
     },
     behaviorExecutions: [],
-    softAssertions: []
+    softAssertions: [],
+    workflowLedger: createWorkflowLedger()
   };
 
   try {
@@ -252,7 +254,7 @@ async function openOwnFactReviewForSmokeTest(page, config, createdCase) {
       continue;
     }
     if (isDashboardPage(page.url(), text)) {
-      await openCaseDetailsFromDashboard(page, createdCase, config.run.caseType).catch(() => {});
+      await openCaseFromDashboard(page, createdCase, config.run.caseType).catch(() => {});
     } else {
       await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
     }
@@ -292,8 +294,9 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   // calls kept the process alive for minutes after the run had finished and written its
   // artifacts (CG-0007's alignment resume) — as well as spending tokens nothing consumes.
   const dossierResumePhase = config.run.resumePhase ?? null;
+  const resumePhaseIndex = dossierResumePhase ? WORKFLOW_PHASES.indexOf(dossierResumePhase) : -1;
   const willRunAnInterview = !dossierResumePhase
-    || WORKFLOW_PHASES.indexOf('requestor_interview') >= WORKFLOW_PHASES.indexOf(dossierResumePhase);
+    || resumePhaseIndex <= WORKFLOW_PHASES.indexOf('manager_interview');
   let dossiersPromise = null;
   if (willRunAnInterview) {
     recordStage(artifacts, 'Generate Scenario Dossiers', 'started');
@@ -334,233 +337,184 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   };
   if (resumePhase) {
     artifacts.case = existingCaseFromConfig(config, syntheticCase);
+    scenarioController.setRequestorRole('manager');
+    artifacts.resolvedActorRoles = { requestor: 'manager', participant: 'employee' };
+    for (const step of artifacts.workflowLedger) {
+      if (step.phase !== 'complete' && WORKFLOW_PHASES.indexOf(step.phase) < WORKFLOW_PHASES.indexOf(resumePhase)) {
+        recordWorkflowStep(artifacts, step.id, 'completed', `Assumed complete when resuming at ${resumePhase}.`);
+      }
+    }
     console.log(`[resume] Resuming ${artifacts.case.commonGroundId} at phase "${resumePhase}".`);
   }
 
   if (!skipPhase('create_case', 'Create case')) {
+    recordWorkflowStep(artifacts, 'manager_create_discussion', 'in_progress');
     recordStage(artifacts, 'Create case', 'started');
     const requestorSetupPage = await sessionContext.newPage();
     await login(requestorSetupPage, config, 'requestor', store);
     artifacts.case = await createCase(requestorSetupPage, config, syntheticCase, store);
+    if (artifacts.case.requestorRole) {
+      if (artifacts.case.requestorRole !== 'manager') {
+        throw new Error(
+          `The configured creator resolved to ${artifacts.case.requestorRole}, but Common Ground discussions must be created by the manager. `
+          + 'Configure the manager account as REQUESTOR and the employee account as PARTICIPANT.'
+        );
+      }
+      config.run.requestorRole = artifacts.case.requestorRole;
+      scenarioController.setRequestorRole(artifacts.case.requestorRole);
+      artifacts.resolvedActorRoles = {
+        requestor: artifacts.case.requestorRole,
+        participant: artifacts.case.requestorRole === 'employee' ? 'manager' : 'employee'
+      };
+      console.log(`[roles] Live discussion roles resolved: requestor=${artifacts.resolvedActorRoles.requestor}, participant=${artifacts.resolvedActorRoles.participant}.`);
+    }
     await requestorSetupPage.close();
     recordStage(artifacts, 'Create case', 'passed', artifacts.case?.commonGroundId ?? artifacts.case?.syntheticReference ?? '');
+    recordWorkflowStep(artifacts, 'manager_create_discussion', 'completed', artifacts.case?.commonGroundId ?? 'Discussion created.');
   }
 
   if (!skipPhase('accept_invitation', 'Accept participant invitation')) {
+    recordWorkflowStep(artifacts, 'employee_review_invitation', 'in_progress');
     recordStage(artifacts, 'Accept participant invitation', 'started');
     const participantSetupPage = await sessionContext.newPage();
     await login(participantSetupPage, config, 'participant', store);
     await acceptCaseRequest(participantSetupPage, config, syntheticCase, artifacts.case, store);
     await participantSetupPage.close();
     recordStage(artifacts, 'Accept participant invitation', 'passed');
+    recordWorkflowStep(artifacts, 'employee_review_invitation', 'completed', 'Employee accepted the invitation.');
   }
 
-  // Common Ground order (confirmed manually on prod, 2026-07-16): the conversation is
-  // sequential and gated by requestor/participant role (requestor = creator,
-  // participant = invitee). The REQUESTOR completes their interview + facts FIRST; a
-  // participant who tries to start earlier is held at the "waiting on the other party"
-  // gate. The participant must then rate the requestor's facts BEFORE their own
-  // interview will open — Common Ground states this outright ("Before you can start the
-  // Getting Started conversation, you need to review and rate the fact statements
-  // submitted by the requestor"; see participantFactRatingRequired). The participant
-  // then does their interview + facts, and the requestor rates the participant's facts
-  // last. Roles drive the order, independent of employee/manager.
-  //
-  // This inverts the participant-first order used until 2026-07-16. Runs passed under
-  // that order through 2026-07-07 and failed consistently afterward with no relevant
-  // code change, so Common Ground appears to have tightened enforcement of a sequence
-  // it always intended. waitForInterviewReady's gate detection stays as the safety net
-  // if the order ever flips again.
+  // Canonical order: the manager creates the discussion, but the invited employee
+  // completes the first interview and post-processing sequence. Actor ids remain
+  // requestor=manager and participant=employee for API, dossier, and artifact compatibility.
   artifacts.case.requireExactCaseMatch = true;
+  let dossiersLoaded = false;
+  const ensureScenarioDossiers = async () => {
+    if (dossiersLoaded) return;
+    const dossiers = await dossiersPromise;
+    scenarioController.setDossiers(dossiers);
+    artifacts.roleContracts = scenarioController.validateRoleContracts();
+    console.log(`[roles] Contract verified: requestor=${artifacts.roleContracts.requestor.domainRole}/${artifacts.roleContracts.requestor.perspective}; participant=${artifacts.roleContracts.participant.domainRole}/${artifacts.roleContracts.participant.perspective}.`);
+    artifacts.scenarioDossiers = dossiers;
+    artifacts.scenarioExpressionPlan = dossiers.scenarioExpressionPlan;
+    for (const warning of dossiers.pairValidation?.warnings ?? []) {
+      artifacts.softAssertions.push({
+        type: 'scenario_dossier_pair_audit', passed: false,
+        expected: 'Employee and manager interpretations clearly express the named scenario while sharing objective facts.',
+        observed: warning
+      });
+    }
+    await store.writeJson('scenario-dossiers.json', dossiers);
+    await store.writeJson('scenario-expression-plan.json', dossiers.scenarioExpressionPlan);
+    recordStage(artifacts, 'Generate Scenario Dossiers', 'passed',
+      `${dossiers.employee.canonicalProfile.employeeRole}; ${dossiers.scenarioExpressionPlan.questionExpressions.length} question relationships; fresh case seed ${dossiers.caseSeed}; pair audit warnings ${dossiers.pairValidation?.warnings?.length ?? 0}.`);
+    artifacts.scenarioPlan = scenarioController.getPlan();
+    artifacts.alignmentScenarioId = config.run.alignmentScenarioId;
+    artifacts.behaviorScheduleId = config.run.behaviorSchedule.id;
+    dossiersLoaded = true;
+  };
 
-  // Steps 3-4: Requestor interview, then Requestor fact section.
-  // Open the requestor's case page BEFORE awaiting the dossier, so a real
-  // window stays visible during the dossier wait instead of a blank one.
-  const requestorPage = await sessionContext.newPage();
-  await login(requestorPage, config, 'requestor', store);
-  await openCaseAsRequestor(requestorPage, config, artifacts.case, syntheticCase);
-
-  // D8: click into Getting Started as soon as its link is available on the Case
-  // Details page — do NOT wait on the dossier first. ensureGettingStartedOpen
-  // clicks the link the moment it is visible; the dossier then finishes while
-  // Common Ground loads the interview page (it is only needed once we read the
-  // first prompt and generate a response, just below).
-  const runRequestorInterview = !skipPhase('requestor_interview', 'Requestor Getting Started');
-  if (runRequestorInterview) {
-  recordStage(artifacts, 'Requestor Getting Started', 'started');
-  await ensureGettingStartedOpen(requestorPage, config, artifacts.case);
-  updateArtifactCaseId(artifacts, await findCaseId(requestorPage));
-
-  // The dossier is required before the first response is generated. The wait now
-  // overlaps the Getting Started interview-page load instead of blocking on Case Details.
-  const dossiers = await dossiersPromise;
-  scenarioController.setDossiers(dossiers);
-  artifacts.scenarioDossiers = dossiers;
-  artifacts.scenarioExpressionPlan = dossiers.scenarioExpressionPlan;
-  for (const warning of dossiers.pairValidation?.warnings ?? []) {
-    artifacts.softAssertions.push({
-      type: 'scenario_dossier_pair_audit',
-      passed: false,
-      expected: 'Employee and manager interpretations clearly express the named scenario while sharing objective facts.',
-      observed: warning
+  // Employee: Share Your Perspective -> Clarify & Improve -> Excerpt Review -> Statements.
+  const employeePage = await sessionContext.newPage();
+  await login(employeePage, config, 'participant', store);
+  await openCaseAsParticipant(employeePage, config, artifacts.case, syntheticCase);
+  if (!skipPhase('employee_interview', 'Employee Share Your Perspective')) {
+    recordWorkflowStep(artifacts, 'employee_share_perspective', 'in_progress');
+    recordStage(artifacts, 'Employee Share Your Perspective', 'started');
+    await ensureGettingStartedOpen(employeePage, config, artifacts.case);
+    updateArtifactCaseId(artifacts, await findCaseId(employeePage));
+    await ensureScenarioDossiers();
+    const employeeResult = await runPartnerAiInterview(employeePage, config, participantTranscript, {
+      seed: `${artifacts.case?.commonGroundId ?? store.runId}:employee`, actorRole: 'participant',
+      scenarioController, runDir: store.runDir, scriptedAnswers: config.run.scriptedAnswers,
+      persona, artifacts
     });
+    artifacts.employeeGettingStarted = employeeResult;
+    artifacts.participantGettingStarted = employeeResult;
+    recordStage(artifacts, 'Employee Share Your Perspective', employeeResult.passed ? 'passed' : 'failed', employeeResult.stopReason, { blocking: false });
+    if (!employeeResult.passed) throw new Error(employeeResult.stopReason);
+    recordWorkflowStep(artifacts, 'employee_share_perspective', 'completed', employeeResult.stopReason);
   }
-  await store.writeJson('scenario-dossiers.json', dossiers);
-  await store.writeJson('scenario-expression-plan.json', dossiers.scenarioExpressionPlan);
-  recordStage(
-    artifacts,
-    'Generate Scenario Dossiers',
-    'passed',
-    `${dossiers.employee.canonicalProfile.employeeRole}; ${dossiers.scenarioExpressionPlan.questionExpressions.length} question relationships; fresh case seed ${dossiers.caseSeed}; pair audit warnings ${dossiers.pairValidation?.warnings?.length ?? 0}.`
-  );
-  artifacts.scenarioPlan = scenarioController.getPlan();
-  artifacts.alignmentScenarioId = config.run.alignmentScenarioId;
-  artifacts.behaviorScheduleId = config.run.behaviorSchedule.id;
-
-  const requestorResult = await runPartnerAiInterview(requestorPage, config, requestorTranscript, {
-    seed: `${artifacts.case?.commonGroundId ?? store.runId}:requestor`,
-    actorRole: 'requestor',
-    scenarioController,
-    runDir: store.runDir,
-    scriptedAnswers: config.run.scriptedAnswers,
-    persona,
-    artifacts
-  });
-  artifacts.requestorGettingStarted = requestorResult;
-  recordStage(artifacts, 'Requestor Getting Started', requestorResult.passed ? 'passed' : 'failed', requestorResult.stopReason, { blocking: false });
-  if (!requestorResult.passed) throw new Error(requestorResult.stopReason);
+  if (!skipPhase('employee_post_processing', 'Employee Post-Processing')) {
+    const outcome = await completeActorPostProcessing(employeePage, config, artifacts, 'Employee', ownFactLabel, {
+      includeMissingPerspective: false
+    });
+    recordWorkflowStep(artifacts, 'employee_clarify_improve', 'completed', outcome.clarifyDetail);
+    recordWorkflowStep(artifacts, 'employee_excerpt_review', 'completed', outcome.excerptDetail);
+    recordWorkflowStep(artifacts, 'employee_statements', 'completed', outcome.statementsDetail);
   }
+  await employeePage.screenshot({ path: `${store.runDir}/employee-post-processing.png`, fullPage: true });
+  await employeePage.close();
 
-  if (!skipPhase('requestor_facts', 'Requestor Fact Section')) {
-  recordStage(artifacts, 'Requestor Fact Section', 'started');
-  await withOtherPartyGateRecovery(
-    {
-      page: requestorPage, config, store, createdCase: artifacts.case,
-      actorLabel: 'Requestor', waitName: 'Requestor Fact Section', artifacts,
-      expectedStep: (t, u) => clarifyContextReady(t, u) || excerptReviewReady(t, u) || factLabelingReady(t, u)
-    },
-    () => completeActorPostProcessing(requestorPage, config, artifacts, 'Requestor', ownFactLabel)
-  );
-  recordStage(artifacts, 'Requestor Fact Section', 'passed', `All fact statements labeled ${ownFactLabel}.`);
+  // Manager: rate employee, then complete their own perspective and processing sequence.
+  const managerPage = await sessionContext.newPage();
+  await login(managerPage, config, 'requestor', store);
+  await openCaseAsRequestor(managerPage, config, artifacts.case, syntheticCase);
+  if (!skipPhase('manager_rates_employee', 'Manager Rates Employee Supporting Statements')) {
+    recordWorkflowStep(artifacts, 'manager_rates_employee', 'in_progress');
+    await completeCrossPartyFactReview(managerPage, config, artifacts.case, crossPartyFactLabel, {
+      raterRole: 'requestor', ratedParty: 'participant', mode: 'requestor_rates_participant',
+      actorLabel: 'Manager', handleMissingPerspective: false, artifacts
+    });
+    recordWorkflowStep(artifacts, 'manager_rates_employee', 'completed', `Employee statements rated ${crossPartyFactLabel}.`);
   }
-  await requestorPage.screenshot({ path: `${store.runDir}/requestor-post-processing.png`, fullPage: true });
-  await requestorPage.close();
-
-  // Steps 5-8: Participant rates the requestor's facts, waits for Getting Started
-  // to become available, then does their own interview and fact section. One
-  // participant session covers all four steps. The rating MUST precede the
-  // participant's interview: Common Ground will not open Getting Started until the
-  // requestor's fact statements have been rated.
-  const participantPage = await sessionContext.newPage();
-  await login(participantPage, config, 'participant', store);
-  await openCaseAsParticipant(participantPage, config, artifacts.case, syntheticCase);
-
-  if (!skipPhase('participant_rates_requestor', 'Participant Rates Requestor Facts')) {
-  recordStage(artifacts, 'Participant Rates Requestor Facts', 'started');
-  await withOtherPartyGateRecovery(
-    {
-      page: participantPage, config, store, createdCase: artifacts.case,
-      actorLabel: 'Participant', waitName: 'Participant Rates Requestor Facts', artifacts,
-      expectedStep: (t, u) => factLabelingReady(t, u) || /Rate (?:Participant|Request[eo]r)'?s Facts/i.test(t)
-    },
-    () => completeParticipantFactReview(participantPage, config, artifacts.case, crossPartyFactLabel, artifacts)
-  );
-  recordStage(artifacts, 'Participant Rates Requestor Facts', 'passed', `Requestor facts labeled ${crossPartyFactLabel}.`);
+  if (shouldRunPhase('manager_interview')) {
+    await waitForGettingStartedAfterRating(managerPage, config, artifacts.case, syntheticCase, 'Manager');
+    await ensureGettingStartedOpen(managerPage, config, artifacts.case);
   }
-  await participantPage.screenshot({ path: `${store.runDir}/participant-rates-requestor-facts.png`, fullPage: true });
+  if (!skipPhase('manager_interview', 'Manager Share Your Perspective')) {
+    recordWorkflowStep(artifacts, 'manager_share_perspective', 'in_progress');
+    recordStage(artifacts, 'Manager Share Your Perspective', 'started');
+    await ensureScenarioDossiers();
+    const managerResult = await runPartnerAiInterview(managerPage, config, requestorTranscript, {
+      seed: `${artifacts.case?.commonGroundId ?? store.runId}:manager`, actorRole: 'requestor',
+      scenarioController, runDir: store.runDir, scriptedAnswers: config.run.scriptedAnswers,
+      persona, artifacts
+    });
+    artifacts.managerGettingStarted = managerResult;
+    artifacts.requestorGettingStarted = managerResult;
+    recordStage(artifacts, 'Manager Share Your Perspective', managerResult.passed ? 'passed' : 'failed', managerResult.stopReason, { blocking: false });
+    if (!managerResult.passed) throw new Error(managerResult.stopReason);
+    recordWorkflowStep(artifacts, 'manager_share_perspective', 'completed', managerResult.stopReason);
+  }
+  if (!skipPhase('manager_post_processing', 'Manager Post-Processing')) {
+    const outcome = await completeActorPostProcessing(managerPage, config, artifacts, 'Manager', ownFactLabel, {
+      includeMissingPerspective: true,
+      requireMissingPerspective: true
+    });
+    recordWorkflowStep(artifacts, 'manager_clarify_improve', 'completed', outcome.clarifyDetail);
+    recordWorkflowStep(artifacts, 'manager_missing_perspective', 'completed', outcome.missingPerspectiveDetail);
+    recordWorkflowStep(artifacts, 'manager_excerpt_review', 'completed', outcome.excerptDetail);
+    recordWorkflowStep(artifacts, 'manager_statements', 'completed', outcome.statementsDetail);
+  }
+  await managerPage.screenshot({ path: `${store.runDir}/manager-post-processing.png`, fullPage: true });
+  await managerPage.close();
 
-  // Everything from here to ensureGettingStartedOpen is PREPARATION FOR THE PARTICIPANT
-  // INTERVIEW, so it must be skipped with that phase. Sitting outside the guard, it ran even
-  // when resuming at a later phase and failed on a case whose participant interview was long
-  // finished ("Participant Getting Started did not become available after rating..." while
-  // resuming CG-0007 at "alignment").
-  if (shouldRunPhase('participant_interview')) {
-  // Step 6: the Getting Started button does not appear immediately after rating;
-  // re-open the case from the dashboard and poll until it is available. No-op when
-  // completeParticipantFactReview already returned on a ready input (its
-  // allowGettingStartedReady path).
-  await waitForGettingStartedAfterRating(participantPage, config, artifacts.case, syntheticCase, 'Participant');
+  artifacts.workflowCompleted = false;
+  artifacts.workflowCompletionStage = null;
 
-  // Excerpt review is a post-INTERVIEW screen, so the participant cannot legitimately
-  // be on it here — their interview has not run yet. If it appears, Common Ground is in
-  // a state this sequence does not model; stop rather than let ensureGettingStartedOpen
-  // click a Getting Started link out of an unfinished review (gettingStartedAvailable
-  // is a whole-page text test and would not catch this on its own).
-  const participantPreInterviewText = await readVisibleBodyText(participantPage);
-  if (excerptReviewReady(participantPreInterviewText, participantPage.url())) {
-    const guardShot = `${store.runDir}/participant-unexpected-excerpt-review.png`;
-    await participantPage.screenshot({ path: guardShot, fullPage: true }).catch(() => {});
-    throw new Error(
-      'Participant is on the Excerpt Review screen before their Getting Started interview has run. '
-      + 'Excerpt review is a post-interview step, so Common Ground is in a state this workflow does not model; '
-      + 'stopping instead of clicking further. '
-      + `URL: ${participantPage.url()}. Screenshot: ${guardShot}.`
+  // Employee returns: Add Missing Perspective -> Rate (Manager Name) Supporting Statements.
+  const employeeFinalPage = await sessionContext.newPage();
+  await login(employeeFinalPage, config, 'participant', store);
+  await openCaseAsParticipant(employeeFinalPage, config, artifacts.case, syntheticCase);
+  if (!skipPhase('employee_rates_manager', 'Employee Final Steps')) {
+    recordWorkflowStep(artifacts, 'employee_missing_perspective', 'in_progress');
+    recordWorkflowStep(artifacts, 'employee_rates_manager', 'in_progress');
+    await completeCrossPartyFactReview(employeeFinalPage, config, artifacts.case, crossPartyFactLabel, {
+      raterRole: 'participant', ratedParty: 'requestor', mode: 'participant_rates_requestor',
+      actorLabel: 'Employee', handleMissingPerspective: true, requireMissingPerspective: true, artifacts
+    });
+    recordWorkflowStep(artifacts, 'employee_missing_perspective', 'completed', 'Missing Perspective completed through its cards/Submit or Nothing to add/Continue pathway.');
+    recordWorkflowStep(artifacts, 'employee_rates_manager', 'completed', `Manager statements rated ${crossPartyFactLabel}.`);
+    const briefReady = await completeFinalEmployeeStepsAndWaitForBrief(
+      employeeFinalPage, config, artifacts.case, artifacts, crossPartyFactLabel
     );
+    recordWorkflowStep(artifacts, 'alignment_brief', 'completed', `${briefReady.label} is available.`);
+    artifacts.workflowCompleted = true;
+    artifacts.workflowCompletionStage = 'Alignment Brief Available';
+    await employeeFinalPage.screenshot({ path: `${store.runDir}/employee-rates-manager-statements.png`, fullPage: true });
   }
-  await ensureGettingStartedOpen(participantPage, config, artifacts.case);
-  }
-
-  if (!skipPhase('participant_interview', 'Participant Getting Started')) {
-  recordStage(artifacts, 'Participant Getting Started', 'started');
-  const participantResult = await runPartnerAiInterview(participantPage, config, participantTranscript, {
-    seed: `${artifacts.case?.commonGroundId ?? store.runId}:participant`,
-    actorRole: 'participant',
-    scenarioController,
-    runDir: store.runDir,
-    scriptedAnswers: config.run.scriptedAnswers,
-    persona,
-    artifacts
-  });
-  artifacts.participantGettingStarted = participantResult;
-  recordStage(artifacts, 'Participant Getting Started', participantResult.passed ? 'passed' : 'failed', participantResult.stopReason, { blocking: false });
-  if (!participantResult.passed) throw new Error(participantResult.stopReason);
-  }
-
-  if (!skipPhase('participant_facts', 'Participant Fact Section')) {
-  recordStage(artifacts, 'Participant Fact Section', 'started');
-  await withOtherPartyGateRecovery(
-    {
-      page: participantPage, config, store, createdCase: artifacts.case,
-      actorLabel: 'Participant', waitName: 'Participant Fact Section', artifacts,
-      expectedStep: (t, u) => clarifyContextReady(t, u) || excerptReviewReady(t, u) || factLabelingReady(t, u)
-    },
-    () => completeActorPostProcessing(participantPage, config, artifacts, 'Participant', ownFactLabel)
-  );
-  recordStage(artifacts, 'Participant Fact Section', 'passed', `All fact statements labeled ${ownFactLabel}.`);
-  }
-  await participantPage.screenshot({ path: `${store.runDir}/participant-post-processing.png`, fullPage: true });
-  await participantPage.close();
-
-  // Step 9: Requestor rates the participant's facts.
-  if (!skipPhase('requestor_rates_participant', 'Requestor Rates Participant Facts')) {
-  recordStage(artifacts, 'Requestor Rates Participant Facts', 'started');
-  const requestorReviewPage = await sessionContext.newPage();
-  await login(requestorReviewPage, config, 'requestor', store);
-  await openCaseAsRequestor(requestorReviewPage, config, artifacts.case, syntheticCase);
-  await withOtherPartyGateRecovery(
-    {
-      page: requestorReviewPage, config, store, createdCase: artifacts.case,
-      actorLabel: 'Requestor', waitName: 'Requestor Rates Participant Facts', artifacts,
-      expectedStep: (t, u) => factLabelingReady(t, u) || /Rate (?:Participant|Request[eo]r)'?s Facts/i.test(t)
-    },
-    () => completeCrossPartyFactReview(requestorReviewPage, config, artifacts.case, crossPartyFactLabel, {
-      raterRole: 'requestor',
-      ratedParty: 'participant',
-      linkText: /Rate Participant'?s Facts/i,
-      mode: 'requestor_rates_participant',
-      artifacts
-    })
-  );
-  recordStage(artifacts, 'Requestor Rates Participant Facts', 'passed', `Participant facts labeled ${crossPartyFactLabel}.`);
-  // Inside the phase block: requestorReviewPage is block-scoped to it. These two lines used to
-  // sit after the closing brace, which threw "requestorReviewPage is not defined" for every
-  // run that got this far — CG-0007 reached it with every prior stage passed.
-  await requestorReviewPage.screenshot({ path: `${store.runDir}/requestor-rates-participant-facts.png`, fullPage: true });
-  await requestorReviewPage.close();
-  }
-
-  artifacts.workflowCompleted = true;
-  artifacts.workflowCompletionStage = 'Requestor Rates Participant Facts';
+  await employeeFinalPage.close();
 
   recordStage(artifacts, 'Alignment Report', 'started');
   const reportPage = await sessionContext.newPage();
@@ -569,9 +523,9 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     await login(reportPage, config, 'requestor', store);
     await openCaseAsRequestor(reportPage, config, artifacts.case, syntheticCase);
     // Poll for the full configured post-processing window (e.g. 10 minutes) rather
-    // than a hard 3-minute cap. The report can take several minutes to render, and
-    // the dashboard "Latest Alignment: NN%" is read as a fallback below, so there is
-    // no benefit to giving up early.
+    // than a hard 3-minute cap. The report can take several minutes to render, but
+    // report rendering is diagnostic: the workflow terminal condition is the actual
+    // Your Alignment Brief action verified above.
     const alignmentReport = await waitForAndReadAlignmentReport(reportPage, config, artifacts.case, artifacts);
     artifacts.alignmentReport = {
       ...alignmentReport,
@@ -583,22 +537,31 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
       alignmentReport.score,
       artifacts.alignmentReport.expectedRange
     );
+    // Resume-at-alignment runs skip the gate above; reaching the real report page is
+    // equivalent proof that the brief became available.
+    artifacts.workflowCompleted = true;
+    artifacts.workflowCompletionStage = 'Alignment Brief Available';
     recordStage(artifacts, 'Alignment Report', 'passed', alignmentReport.score === null ? 'Score not detected.' : `Score ${alignmentReport.score}.`);
     await reportPage.screenshot({ path: `${store.runDir}/alignment-report.png`, fullPage: true });
   } catch (error) {
     alignmentReportIssue = {
       type: 'alignment_report_availability',
       passed: false,
-      expected: 'Alignment Report becomes available after workflow completion.',
+      expected: 'Alignment Report content becomes readable after Your Alignment Brief becomes available.',
       observed: error.message
     };
     artifacts.alignmentReport = {
       score: null,
       withinExpectedRange: undefined,
-      affectsCaseResult: false,
+      affectsCaseResult: !artifacts.workflowCompleted,
       unavailableReason: error.message
     };
-    recordStage(artifacts, 'Alignment Report', 'not_available', `${error.message} (record only)`);
+    recordStage(
+      artifacts,
+      'Alignment Report',
+      'not_available',
+      `${error.message}${artifacts.workflowCompleted ? ' (record only; Alignment Brief availability was confirmed)' : ''}`
+    );
   } finally {
     await reportPage.close();
   }
@@ -629,13 +592,21 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
     ? null
     : Boolean(requestorCompleted && participantCompleted);
   artifacts.syntheticUserScenarioCompliant = coverage.syntheticUserScenarioCompliant;
+  if (artifacts.workflowCompleted) {
+    const briefStep = artifacts.workflowLedger.find((step) => step.id === 'alignment_brief');
+    if (briefStep?.status !== 'completed') {
+      recordWorkflowStep(artifacts, 'alignment_brief', 'completed', 'Alignment Brief page became available.');
+    }
+    assertWorkflowLedgerComplete(artifacts.workflowLedger);
+    recordWorkflowStep(artifacts, 'runner_complete', 'completed', 'All canonical workflow steps completed.');
+  }
   artifacts.status = fullWorkflowResultStatus({
     workflowCompleted: artifacts.workflowCompleted
   });
-  artifacts.statusBasis = 'workflow_completion';
+  artifacts.statusBasis = 'alignment_brief_availability';
   artifacts.stopReason = artifacts.workflowCompleted
-    ? 'Full workflow completed through Requestor rating of Participant facts.'
-    : 'The Common Ground workflow did not complete.';
+    ? 'Full workflow completed and Your Alignment Brief became available.'
+    : 'The Common Ground workflow did not reach Your Alignment Brief.';
   artifacts.finishedAt = new Date().toISOString();
   return artifacts;
 }
@@ -936,12 +907,37 @@ async function createCase(page, config, syntheticCase, store) {
   // both parties auto-resolved and read-only); fillCaseParties detects which one is on
   // screen and fails loudly if it is none of them.
   await fillPresentDates(page, todayIso());
-  await fillCaseParties(page, selectors, config, syntheticCase, store);
+  const roleResolution = await fillCaseParties(page, selectors, config, syntheticCase, store);
   await click(page, selectors.createCaseButton, 'create case submit');
+
+  // A hydrated SPA can occasionally render an actionable submit button before its
+  // handler reliably advances the route. Confirm that the form actually exits; if the
+  // first click is dropped, restore any cleared values and retry exactly once.
+  let submission = await waitForCaseCreationSubmission(page, existingCaseIds);
+  if (!submission.confirmed) {
+    console.warn('[create-case] Create click did not leave the New Discussion form; refilling and retrying once.');
+    await fillPresentDates(page, todayIso());
+    await fillCaseParties(page, selectors, config, syntheticCase, store);
+    await click(page, selectors.createCaseButton, 'create case submit retry');
+    submission = await waitForCaseCreationSubmission(page, existingCaseIds);
+  }
+
+  if (!submission.confirmed) {
+    const shot = `${store.runDir}/case-creation-submit-failed.png`;
+    await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
+    const visible = (await readVisibleBodyText(page)).replace(/\s+/g, ' ').trim().slice(0, 1200);
+    throw new Error(
+      `New Discussion submission did not advance after two clicks. `
+      + `The discussion was not confirmed as created. Current URL: ${page.url()}. `
+      + `Screenshot: ${shot}. Visible page text: ${visible}`
+    );
+  }
+
   await waitForDiscussionsLoaded(page);
   await page.waitForTimeout(2000);
 
-  const commonGroundId = await waitForCreatedCaseId(page, config, existingCaseIds);
+  const commonGroundId = submission.commonGroundId
+    ?? await waitForCreatedCaseId(page, config, existingCaseIds);
   if (!commonGroundId) {
     throw new Error('Common Ground case creation completed, but the new Common Ground ID could not be detected. Refusing to continue without an exact case identity.');
   }
@@ -952,8 +948,39 @@ async function createCase(page, config, syntheticCase, store) {
     requireExactCaseMatch: true,
     caseUrl: page.url(),
     syntheticReference: syntheticCase.reference,
-    title: syntheticCase.title
+    title: syntheticCase.title,
+    requestorRole: roleResolution?.requestorRole ?? config.run.requestorRole
   };
+}
+
+function recordWorkflowStep(artifacts, stepId, status, detail = '') {
+  return updateWorkflowLedger(artifacts.workflowLedger, stepId, status, detail);
+}
+
+async function waitForCaseCreationSubmission(page, existingCaseIds = [], timeoutMs = 15000) {
+  const knownIds = new Set(existingCaseIds.map((id) => id.toUpperCase()));
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const text = await readVisibleBodyText(page);
+    const currentIds = findCaseIdsInText(`${page.url()}\n${text}`);
+    const commonGroundId = currentIds.find((id) => !knownIds.has(id)) ?? null;
+    if (commonGroundId) return { confirmed: true, commonGroundId };
+    if (!onNewDiscussionForm(page.url(), text)) return { confirmed: true, commonGroundId: null };
+    await page.waitForTimeout(300);
+  }
+
+  return { confirmed: false, commonGroundId: null };
+}
+
+function onNewDiscussionForm(url, visibleText = '') {
+  let pathname = '';
+  try {
+    pathname = new URL(url, 'https://example.invalid').pathname;
+  } catch {
+    pathname = String(url ?? '');
+  }
+  return /\/request\/new\/?$/i.test(pathname);
 }
 
 async function waitForCreatedCaseId(page, config, existingCaseIds = []) {
@@ -1132,7 +1159,7 @@ async function openCaseAsRequestor(page, config, createdCase, syntheticCase) {
 
 async function openCaseAsParticipant(page, config, createdCase, syntheticCase) {
   await ensureOnDashboard(page, config);
-  await openCaseDetailsFromDashboard(page, createdCase, syntheticCase.caseType);
+  await openCaseFromDashboard(page, createdCase, syntheticCase.caseType);
   await waitForIdle(page);
 }
 
@@ -1559,19 +1586,53 @@ async function runPartnerAiInterviewTurns(page, config, transcript, options = {}
     }
 
     await responseInput.fill(response);
-    await click(page, config.selectors.partnerAi.sendButton, 'Partner AI send');
-    // Verify the send actually happened: the app clears the input on success.
-    // A click landing during a re-render can silently miss (observed on
-    // CG-0082: the full response sat in the textarea, Partner AI never
-    // replied, and the stall guard aborted the interview). Retry while the
-    // text remains in the box.
+    // A Send click can time out after Common Ground has already accepted the answer and
+    // navigated to Clarify & Improve. Treat the live page state as authoritative instead
+    // of failing solely because Playwright did not observe the click finish (CG-0103).
+    let submissionState = null;
+    let lastSendError = null;
     for (let sendAttempt = 1; sendAttempt <= 3; sendAttempt += 1) {
+      try {
+        await click(
+          page,
+          config.selectors.partnerAi.sendButton,
+          sendAttempt === 1 ? 'Partner AI send' : 'Partner AI send (retry)'
+        );
+      } catch (error) {
+        lastSendError = error;
+      }
+
       await page.waitForTimeout(1500);
-      const residual = await responseInput.inputValue().catch(async () =>
-        responseInput.evaluate((el) => el.value ?? el.textContent ?? '').catch(() => ''));
-      if (!String(residual ?? '').trim()) break;
-      console.warn(`[interview] Send attempt ${sendAttempt} left the response in the input; clicking send again.`);
-      await click(page, config.selectors.partnerAi.sendButton, 'Partner AI send (retry)');
+      submissionState = await inspectInterviewSubmission(page, config);
+      if (submissionState.accepted) {
+        if (lastSendError) {
+          console.warn(
+            `[interview] Send click reported an error, but Common Ground accepted the response `
+              + `(${submissionState.reason}; ${submissionState.url}). Continuing.`
+          );
+        }
+        break;
+      }
+
+      console.warn(
+        `[interview] Send attempt ${sendAttempt} was not accepted `
+          + `(input ${submissionState.inputVisible ? 'still visible' : 'not visible'}, `
+          + `residual ${submissionState.residual ? 'present' : 'empty'}); retrying.`
+      );
+    }
+
+    if (!submissionState?.accepted) {
+      const slug = String(options.actorRole ?? 'actor').toLowerCase().replace(/\s+/g, '-');
+      const screenshotPath = options.runDir ? `${options.runDir}/send-response-failed-${slug}-turn-${turn}.png` : null;
+      if (screenshotPath) await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
+      throw new Error([
+        `Partner AI response was not accepted after 3 send attempts.`,
+        `Last click error: ${lastSendError?.message ?? 'none'}`,
+        `Current URL: ${submissionState?.url ?? page.url()}`,
+        `Input state: visible=${submissionState?.inputVisible ?? false}, residual=${submissionState?.residual ? 'present' : 'empty'}`,
+        `Last visible page text: ${compactVisibleText(submissionState?.visibleText ?? await readVisibleBodyText(page), 1200)}`,
+        screenshotPath ? `Screenshot: ${screenshotPath}` : ''
+      ].filter(Boolean).join('\n'));
     }
     // Anchor the next prompt read to this answer: the following turn must not read the
     // page until Partner AI has posted something after it.
@@ -1961,6 +2022,9 @@ async function factStatementsAlreadySubmitted(page) {
   return page.evaluate(() => {
     const norm = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
     const text = norm(document.body?.innerText);
+    // Current cross-rating UI replaces the counter and Submit button with this
+    // success state after submission. Do not attempt to submit it a second time.
+    if (/All statements have been successfully rated/i.test(text)) return true;
     const counter = text.match(/(\d+)\s*\/\s*(\d+)\s+labell?ed/i);
     if (!counter || Number(counter[1]) < Number(counter[2]) || Number(counter[2]) === 0) return false;
     return [...document.querySelectorAll('button,[role="button"],input[type="submit"]')].some((node) => {
@@ -1971,7 +2035,22 @@ async function factStatementsAlreadySubmitted(page) {
   }).catch(() => false);
 }
 
-async function completeActorPostProcessing(page, config, artifacts, actorLabel, labelText = config.run.scenarioFoundation.topic.workflow.factStatementLabel) {
+async function completeActorPostProcessing(
+  page,
+  config,
+  artifacts,
+  actorLabel,
+  labelText = config.run.scenarioFoundation.topic.workflow.factStatementLabel,
+  options = {}
+) {
+  const includeMissingPerspective = options.includeMissingPerspective === true;
+  const requireMissingPerspective = options.requireMissingPerspective === true;
+  const result = {
+    clarifyDetail: 'Clarify & Improve was already complete.',
+    missingPerspectiveDetail: includeMissingPerspective ? 'Add Missing Perspective was already complete.' : 'Not part of this actor phase.',
+    excerptDetail: 'Excerpt Review was already complete.',
+    statementsDetail: 'Statements were already complete.'
+  };
   await assertNoBlockingStageFailure(page, artifacts, `${actorLabel} post-processing`);
   // Discussion Details does not auto-advance: it parks on a status list with a
   // "Next: <step>" link, and the step page only opens when that link is clicked. Without this
@@ -1982,7 +2061,7 @@ async function completeActorPostProcessing(page, config, artifacts, actorLabel, 
   // would poll it forever (CG-0098, resumed at participant_facts). Open the
   // case first so the pending step is reachable.
   if (isDashboardPage(page.url(), await readVisibleBodyText(page))) {
-    const opened = await openCaseDetailsFromDashboard(page, artifacts.case, config.run.caseType)
+    const opened = await openCaseFromDashboard(page, artifacts.case, config.run.caseType)
       .then(() => true).catch(() => false);
     if (opened) {
       await waitForIdle(page);
@@ -2002,11 +2081,11 @@ async function completeActorPostProcessing(page, config, artifacts, actorLabel, 
     const summary = ownStatus.map((row) => row.label).join(', ');
     console.log(`[workflow] ${actorLabel}: every own post-processing step is already complete (${summary}); moving on.`);
     recordStage(artifacts, `${actorLabel} Post-Processing`, 'passed', `Already complete on the live case: ${summary}.`);
-    return;
+    return result;
   }
 
   const firstState = await waitForWorkflowState(page, config, {
-    name: `${actorLabel.toLowerCase()} clarify context, missing perspective, excerpt review or fact statement labeling`,
+    name: `${actorLabel.toLowerCase()} Clarify & Improve, Excerpt Review or Statements`,
     ready: (text, currentPage) => clarifyContextReady(text, currentPage.url())
       || missingPerspectiveReady(text, currentPage.url())
       || excerptReviewReady(text, currentPage.url())
@@ -2018,47 +2097,85 @@ async function completeActorPostProcessing(page, config, artifacts, actorLabel, 
   // navigated away from: the case Status list keeps it "in progress" until it is submitted,
   // and the Alignment Brief never unlocks. We complete it by skipping each prompt.
   if (clarifyContextReady(await readVisibleBodyText(page), page.url())) {
-    recordStage(artifacts, `${actorLabel} Clarify Context`, 'started', firstState.url);
-    const outcome = await skipClarifyContext(page, config, actorLabel);
-    if (outcome.completed) {
-      console.log(`[clarify-context] ${actorLabel}: step submitted and confirmed complete (${outcome.work || 'nothing to resolve'}).`);
+    recordStage(artifacts, `${actorLabel} Clarify & Improve`, 'started', firstState.url);
+    const clarifyOutcome = await skipClarifyContext(page, config, actorLabel);
+    if (clarifyOutcome.completed) {
+      console.log(`[clarify-context] ${actorLabel}: step submitted and confirmed complete (${clarifyOutcome.work || 'nothing to resolve'}).`);
       recordStage(
         artifacts,
-        `${actorLabel} Clarify Context`,
+        `${actorLabel} Clarify & Improve`,
         'passed',
-        `Submit & Continue clicked and the step completed (${outcome.work || 'nothing to resolve'}).`
+        `Submit & Continue clicked and the step completed (${clarifyOutcome.work || 'nothing to resolve'}).`
       );
+      result.clarifyDetail = `Completed ${clarifyOutcome.work || 'all cards'}.`;
     } else {
       // Stop here. Previously this fell back to the Excerpt Review tab, which moved the browser
       // on without completing the step; the case then stalled downstream with an unrelated-
       // looking symptom (CG-0004). The dump names every card still unresolved.
-      const unresolvedSummary = outcome.unresolved.length
-        ? outcome.unresolved.map((card) => `${card.heading} [controls: ${card.controls.map((c) => c.label + (c.disabled ? '(disabled)' : '')).join(', ') || 'none'}]`).join('; ')
+      const unresolvedSummary = clarifyOutcome.unresolved.length
+        ? clarifyOutcome.unresolved.map((card) => `${card.heading} [controls: ${card.controls.map((c) => c.label + (c.disabled ? '(disabled)' : '')).join(', ') || 'none'}]`).join('; ')
         : 'none detected';
       await failStage(
         page,
         artifacts,
-        `${actorLabel} Clarify Context`,
-        `"Submit & Continue" did not complete the step (button ${outcome.submission.lastState} after `
-          + `${outcome.submission.clicks} click(s), ${Math.round(outcome.submission.elapsedMs / 1000)}s). `
-          + `${outcome.unresolved.length} of ${outcome.cardCount} card(s) unresolved: ${unresolvedSummary}.`,
-        { extra: { work: outcome.work, submission: outcome.submission, unresolved: outcome.unresolved, contextItems: outcome.contextItems } }
+        `${actorLabel} Clarify & Improve`,
+        `"Submit & Continue" did not complete the step (button ${clarifyOutcome.submission.lastState} after `
+          + `${clarifyOutcome.submission.clicks} click(s), ${Math.round(clarifyOutcome.submission.elapsedMs / 1000)}s). `
+          + `${clarifyOutcome.unresolved.length} of ${clarifyOutcome.cardCount} card(s) unresolved: ${unresolvedSummary}.`,
+        { extra: { work: clarifyOutcome.work, submission: clarifyOutcome.submission, unresolved: clarifyOutcome.unresolved, contextItems: clarifyOutcome.contextItems } }
       );
     }
     await waitForWorkflowState(page, config, {
-      name: `${actorLabel.toLowerCase()} missing perspective, excerpt review or fact statement labeling`,
+      name: `${actorLabel.toLowerCase()} ${includeMissingPerspective ? 'Add Missing Perspective, ' : ''}Excerpt Review or Statements`,
       ready: (text, currentPage) => missingPerspectiveReady(text, currentPage.url())
         || excerptReviewReady(text, currentPage.url())
         || factLabelingReady(text, currentPage.url())
     });
   }
 
+  // Common Ground places Add Missing Perspective in the tab sequence immediately after
+  // Clarify & Improve even during the employee's first pass. At that point it is only a
+  // waiting gate: the manager has not shared anything to compare yet. Leave the page for
+  // Excerpt Review without completing or recording the later employee workflow step.
+  if (!includeMissingPerspective && missingPerspectiveReady(await readVisibleBodyText(page), page.url())) {
+    const deferred = await completeMissingPerspectiveStep(page, artifacts, actorLabel);
+    if (deferred.mode !== 'waiting') {
+      throw new Error(
+        `${actorLabel} Add Missing Perspective became actionable before the counterparty completed their perspective; `
+        + `refusing to complete the canonical step out of order (${deferred.mode ?? 'unknown state'}).`
+      );
+    }
+    result.missingPerspectiveDetail = 'Deferred waiting gate left for the later canonical Add Missing Perspective step.';
+    await waitForWorkflowState(page, config, {
+      name: `${actorLabel.toLowerCase()} Excerpt Review or Statements after deferred Missing Perspective`,
+      ready: (text, currentPage) => excerptReviewReady(text, currentPage.url()) || factLabelingReady(text, currentPage.url())
+    });
+  }
+
   // "Add Missing Perspective" follows Clarify & Improve when the mediator found
   // details the other party raised that this actor never covered.
-  if (missingPerspectiveReady(await readVisibleBodyText(page), page.url())) {
-    await completeMissingPerspectiveStep(page, artifacts, actorLabel);
+  if (includeMissingPerspective && missingPerspectiveReady(await readVisibleBodyText(page), page.url())) {
+    const missingOutcome = await completeMissingPerspectiveStep(page, artifacts, actorLabel);
+    if (!missingOutcome.handled && requireMissingPerspective) {
+      throw new Error(`${actorLabel} Add Missing Perspective did not complete (${missingOutcome.mode ?? 'unknown state'}).`);
+    }
+    result.missingPerspectiveDetail = missingOutcome.mode === 'empty'
+      ? 'Nothing to add here; Continue selected.'
+      : `${missingOutcome.declined ?? 0} perspective card(s) resolved and submitted.`;
     await waitForWorkflowState(page, config, {
-      name: `${actorLabel.toLowerCase()} excerpt review or fact statement labeling`,
+      name: `${actorLabel.toLowerCase()} Excerpt Review or Statements`,
+      ready: (text, currentPage) => confirmAdditionsReady(text, currentPage.url())
+        || excerptReviewReady(text, currentPage.url())
+        || factLabelingReady(text, currentPage.url())
+    });
+  } else if (requireMissingPerspective) {
+    throw new Error(`${actorLabel} Add Missing Perspective was required but Common Ground advanced without displaying it.`);
+  }
+
+  if (confirmAdditionsReady(await readVisibleBodyText(page), page.url())) {
+    await completeConfirmAdditionsIfPresent(page, artifacts, actorLabel);
+    await waitForWorkflowState(page, config, {
+      name: `${actorLabel.toLowerCase()} Excerpt Review or Statements after Confirm Additions`,
       ready: (text, currentPage) => excerptReviewReady(text, currentPage.url()) || factLabelingReady(text, currentPage.url())
     });
   }
@@ -2074,15 +2191,20 @@ async function completeActorPostProcessing(page, config, artifacts, actorLabel, 
       'passed',
       approvalCount ? `${approvalCount.approved}/${approvalCount.total} excerpts approved and submitted.` : 'Excerpt review submitted.'
     );
+    result.excerptDetail = approvalCount
+      ? `${approvalCount.approved}/${approvalCount.total} excerpts approved and submitted.`
+      : 'Excerpt Review submitted.';
   }
 
-  recordStage(artifacts, `${actorLabel} Fact Statement Labels`, 'started');
+  recordStage(artifacts, `${actorLabel} Statements`, 'started');
   await waitForWorkflowState(page, config, {
     name: `${actorLabel.toLowerCase()} fact statement labeling`,
     ready: (text, currentPage) => factLabelingReady(text, currentPage.url())
   });
   await labelFactStatements(page, config, labelText);
-  recordStage(artifacts, `${actorLabel} Fact Statement Labels`, 'passed', `All fact statements labeled ${labelText} and submitted.`);
+  result.statementsDetail = `All statements labeled ${labelText} and submitted.`;
+  recordStage(artifacts, `${actorLabel} Statements`, 'passed', result.statementsDetail);
+  return result;
 }
 
 function excerptReviewReady(text, url = '') {
@@ -2167,17 +2289,98 @@ async function skipClarifyContext(page, config, actorLabel = 'actor') {
 
 // Step pages reachable from the Discussion Details status list via its "Next: <step>" link.
 const PENDING_STEP_LINKS = [
-  { name: /Add Helpful Details/i, route: /\/clarify-context/i },
+  { name: /Clarify\s*&\s*Improve/i, route: /\/clarify-context/i },
   { name: /Add Missing Perspective/i, route: /\/missing-perspective/i },
-  { name: /Confirm Your Additions/i, route: /\/(?:confirm-additions|new-evidence)/i },
-  { name: /Review Your Excerpts/i, route: /\/excerpt-review/i },
-  { name: /Rate (?:Your|[\w'’-]+'?s) Supporting Statements/i, route: /\/(?:fact-review|cross-rate)/i }
+  { name: /Confirm(?: your)? additions/i, route: /\/confirm-additions/i },
+  { name: /^Excerpt Review$/i, route: /\/excerpt-review/i },
+  { name: /^Statements$/i, route: /\/fact-review/i },
+  { name: /^Rate\s+(?:Your|.+?)\s+Supporting Statements$/i, route: /\/(?:fact-review|cross-rate)/i }
 ];
 
 function missingPerspectiveReady(text, url = '') {
   const value = String(text ?? '');
   if (/\/missing-perspective(?:[/?#]|$)/i.test(String(url ?? ''))) return true;
   return /Missing Perspective Item\s*\d+/i.test(value) || /Nothing to add here/i.test(value);
+}
+
+function confirmAdditionsReady(text, url = '') {
+  const value = String(text ?? '');
+  // Common Ground briefly retains /confirm-additions while replacing the page
+  // with "Loading discussion details...". The rendered heading is therefore
+  // authoritative; the route alone produces a false positive.
+  return /Confirm your additions/i.test(value)
+    && /\/confirm-additions(?:[/?#]|$)/i.test(String(url ?? ''));
+}
+
+function confirmAdditionsCompletedInStatus(text = '') {
+  // Discussion Details renders completed historical steps as "<label> View".
+  // This is stronger evidence than an active cross-rate link, which staging can
+  // expose before the employee's Missing Perspective comparison has finished.
+  return /Confirm(?: Your)? Additions\s+View/i.test(String(text ?? ''));
+}
+
+// Common Ground may insert this compatibility page after Add Missing Perspective.
+// It confirms the preceding step and is not a separate canonical workflow phase.
+async function completeConfirmAdditionsIfPresent(page, artifacts, actorLabel) {
+  let text = await readVisibleBodyText(page);
+  if (!confirmAdditionsReady(text, page.url())) {
+    let opened = false;
+    for (const role of ['link', 'button']) {
+      const control = page.getByRole(role, { name: /Confirm(?: your)? additions/i }).first();
+      if (!await control.isVisible({ timeout: 750 }).catch(() => false)) continue;
+      if (!await control.isEnabled({ timeout: 500 }).catch(() => false)) continue;
+      if (!await control.click({ timeout: 5000 }).then(() => true).catch(() => false)) continue;
+      opened = true;
+      console.log(`[confirm-additions] ${actorLabel}: opened the transition from Discussion Details.`);
+      break;
+    }
+    if (!opened && /Next\s*:?[\s\S]{0,80}Confirm(?: your)? additions/i.test(text)) {
+      const detailsUrl = page.url();
+      const directUrl = detailsUrl.replace(/\/cases\/([^/?#]+)(?:[/?#].*)?$/i, '/cases/$1/confirm-additions');
+      if (directUrl !== detailsUrl) {
+        await page.goto(directUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
+        opened = true;
+        console.log(`[confirm-additions] ${actorLabel}: opened the advertised transition by its case URL.`);
+      }
+    }
+    if (!opened) return { handled: false, mode: 'absent' };
+    await page.waitForLoadState('networkidle').catch(() => {});
+    await page.waitForTimeout(1500);
+    text = await readVisibleBodyText(page);
+    if (!confirmAdditionsReady(text, page.url())) return { handled: false, mode: 'advanced' };
+  }
+
+  const continueButton = page.getByRole('button', { name: /^Continue$/i }).first();
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    if (!confirmAdditionsReady(text, page.url())) return { handled: false, mode: 'advanced' };
+    if (await continueButton.isVisible({ timeout: 750 }).catch(() => false)
+      && await continueButton.isEnabled({ timeout: 500 }).catch(() => false)) break;
+    await page.waitForTimeout(750);
+    text = await readVisibleBodyText(page);
+  }
+
+  const empty = /Nothing to confirm/i.test(text);
+  if (!await continueButton.isVisible({ timeout: 500 }).catch(() => false)
+    || !await continueButton.isEnabled({ timeout: 500 }).catch(() => false)) {
+    throw new Error(
+      `${actorLabel} Confirm Additions ${empty ? 'displayed "Nothing to confirm" but ' : ''}`
+      + 'did not provide an actionable Continue button.'
+    );
+  }
+
+  const priorUrl = page.url();
+  await continueButton.click({ timeout: 10000 });
+  await page.waitForLoadState('networkidle').catch(() => {});
+  await page.waitForTimeout(1500);
+  console.log(`[confirm-additions] ${actorLabel}: ${empty ? 'nothing to confirm; ' : ''}continued to the next workflow step.`);
+  recordStage(
+    artifacts,
+    `${actorLabel} Confirm Additions Transition`,
+    'passed',
+    `${empty ? 'Nothing to confirm; ' : ''}Continue selected from ${priorUrl}.`
+  );
+  return { handled: true, mode: empty ? 'empty' : 'continue' };
 }
 
 // Leave the Add Missing Perspective step by whichever affordance the current
@@ -2246,17 +2449,22 @@ async function completeMissingPerspectiveStep(page, artifacts, actorLabel) {
   }
 
   if (mode === 'empty') {
-    // Leave the step by whichever affordance this variant offers: the empty
-    // state has Continue, the 0/0 variant has neither Continue nor Submit and
-    // must be left via the tab strip, or the run stalls here (CG-0087).
-    const left = await leaveMissingPerspectiveStep(page);
+    const emptyText = await readVisibleBodyText(page);
+    let left;
+    if (/Nothing to add here/i.test(emptyText)) {
+      const continueButton = page.getByRole('button', { name: /^Continue$/i }).first();
+      const continued = await clickWhenActionable(continueButton);
+      if (!continued) {
+        throw new Error(`${actorLabel} Add Missing Perspective displayed "Nothing to add here" without an actionable Continue button.`);
+      }
+      await page.waitForLoadState('networkidle').catch(() => {});
+      await page.waitForTimeout(1500);
+      left = 'Continue';
+    } else {
+      // Compatibility for the older 0/0 presentation that did not expose Continue.
+      left = await leaveMissingPerspectiveStep(page);
+    }
     console.log(`[missing-perspective] ${actorLabel}: zero items; left the step via ${left}.`);
-    artifacts?.softAssertions?.push({
-      type: 'missing_perspective_empty_state_unsubmittable',
-      passed: false,
-      expected: 'A zero-item Add Missing Perspective step completes (or auto-completes) so the workflow can advance.',
-      observed: `The zero-item step exposes no submit affordance (exited via ${left}); it relies on the backend auto-completing zero-item builds, otherwise the stage stays pending and gates cross-rating and the Alignment Brief.`
-    });
     recordStage(artifacts, `${actorLabel} Missing Perspective`, 'passed', `Nothing to add (zero items); left via ${left}.`);
     return { handled: true, mode };
   }
@@ -2266,7 +2474,7 @@ async function completeMissingPerspectiveStep(page, artifacts, actorLabel) {
     let declined = 0;
     // Spec caps items at 10; each "I Don't Know" disables after tapping.
     for (let round = 0; round < 15; round += 1) {
-      const buttons = await page.getByRole('button', { name: /I Don'?t Know/i }).all();
+      const buttons = await page.getByRole('button', { name: /^(?:I Don'?t Know|Skip)$/i }).all();
       let clicked = false;
       for (const button of buttons) {
         if (!await button.isVisible().catch(() => false)) continue;
@@ -2289,21 +2497,22 @@ async function completeMissingPerspectiveStep(page, artifacts, actorLabel) {
       await page.waitForLoadState('networkidle').catch(() => {});
       await page.waitForTimeout(2000);
     }
-    // Never claim a submit that did not happen, and never leave the run parked
-    // on this step: if Submit was absent or the page stayed put, leave via the
-    // tab strip so the following steps can proceed.
+    // A populated Missing Perspective page is complete only after its Submit
+    // succeeds. Leaving via the tab strip would skip a required canonical step
+    // and can make a later rating action appear available out of order.
     const stillHere = /\/missing-perspective(?:[/?#]|$)/i.test(page.url());
-    const exit = stillHere ? await leaveMissingPerspectiveStep(page) : 'submit';
     const detail = `${declined} item(s) answered "I Don't Know"; ${submitted ? 'submitted' : 'no Submit control was available'}`
-      + `${stillHere ? `, left the step via ${exit}` : ''}.`;
+      + `${submitted && stillHere ? ', submission did not navigate away from the step' : ''}.`;
     console.log(`[missing-perspective] ${actorLabel}: ${detail}`);
     if (!submitted) {
       artifacts?.softAssertions?.push({
         type: 'missing_perspective_not_submitted',
         passed: false,
         expected: 'The Add Missing Perspective step offers a Submit control once its items are answered.',
-        observed: `${declined} item(s) answered but no enabled Submit control was present at ${page.url()}; the tool left via ${exit}.`
+        observed: `${declined} item(s) answered but no enabled Submit control was present at ${page.url()}.`
       });
+      recordStage(artifacts, `${actorLabel} Missing Perspective`, 'failed', detail);
+      return { handled: false, mode, declined, submitted: false };
     }
     recordStage(artifacts, `${actorLabel} Missing Perspective`, 'passed', detail);
     return { handled: true, mode, declined, submitted };
@@ -2320,74 +2529,6 @@ async function completeMissingPerspectiveStep(page, artifacts, actorLabel) {
     observed: `Neither cards nor "Nothing to add here" appeared within 45s at ${page.url()}.`
   });
   return { handled: false, mode: 'unrecognized' };
-}
-
-// "Confirm Your Additions" sits between Missing Perspective and Rate the Other
-// Party's Statements on the requestor's return visit: perspectives they saved
-// become new evidence they must confirm, because unlike the participant they
-// have already finished Excerpt Review and would otherwise never see it.
-//
-// It renders even when there is nothing to confirm (every item answered "I
-// Don't Know" produces zero new evidence) and still requires an explicit
-// Continue. Skipping it leaves the rating step 409-gated, so the cross-rating
-// wait just refreshes until it times out — observed on CG-0088, where the step
-// had to be cleared by hand.
-async function completeConfirmAdditionsIfPresent(page, artifacts, actorLabel) {
-  const text = await readVisibleBodyText(page);
-  // "Confirm Your Additions" is ALSO a row label in the case detail page's
-  // status list, so matching the phrase alone finds the tracker rather than the
-  // step (CG-0089: it matched on the detail page, found no controls, and
-  // recorded a failure that blocked the Alignment Report). Require the step's
-  // own route, or a page that is not the detail page.
-  const onStepRoute = /\/(?:confirm-additions|new-evidence)(?:[/?#]|$)/i.test(page.url());
-  const onCaseDetail = /Discussion Details/i.test(text);
-  if (!onStepRoute && (onCaseDetail || !/Confirm Your Additions/i.test(text))) {
-    return { handled: false, mode: 'absent' };
-  }
-
-  // Confirm each pending addition first; the step will not advance while any
-  // remain. Nothing is invented — these are the user's own saved words.
-  let confirmed = 0;
-  for (let round = 0; round < 15; round += 1) {
-    const buttons = await page.getByRole('button', { name: /^(?:Confirm|Approve|Looks Good)$/i }).all();
-    let clicked = false;
-    for (const button of buttons) {
-      if (!await clickWhenActionable(button)) continue;
-      confirmed += 1;
-      clicked = true;
-      await page.waitForTimeout(700);
-      break;
-    }
-    if (!clicked) break;
-  }
-
-  let advanced = false;
-  for (const name of [/^Continue$/i, /^Submit(?:\s*&?\s*Continue)?$/i, /^Done$/i]) {
-    const control = page.getByRole('button', { name }).first();
-    if (!await clickWhenActionable(control)) continue;
-    await page.waitForLoadState('networkidle').catch(() => {});
-    await page.waitForTimeout(2000);
-    advanced = true;
-    break;
-  }
-
-  const detail = `${confirmed} addition(s) confirmed; ${advanced ? 'continued past the step' : 'no Continue control was available'}.`;
-  console.log(`[confirm-additions] ${actorLabel}: ${detail}`);
-  if (!advanced) {
-    // Recorded as a soft assertion, never a failed stage: this step is
-    // conditional (it only appears when saved perspectives became new
-    // evidence), and a failed stage here blocks the Alignment Report through
-    // assertNoBlockingStageFailure even when the rating step proceeds fine.
-    artifacts?.softAssertions?.push({
-      type: 'confirm_additions_not_advanced',
-      passed: false,
-      expected: 'The Confirm Your Additions step offers a Continue control so the workflow can reach the rating step.',
-      observed: `No enabled Continue control was found at ${page.url()} after confirming ${confirmed} addition(s).`
-    });
-    return { handled: false, confirmed };
-  }
-  recordStage(artifacts, `${actorLabel} Confirm Additions`, 'passed', detail);
-  return { handled: true, confirmed };
 }
 
 // Open and complete the Missing Perspective step when the current page offers
@@ -3086,6 +3227,21 @@ async function openCrossPartyFactReviewIfRequired(page, createdCase, options) {
   const text = await readVisibleBodyText(page);
   if (factLabelingReady(text, page.url())) return true;
 
+  // Dashboard controls must always be resolved inside the exact CG card. The
+  // global rate-control fallback below can otherwise select the same action on
+  // an older discussion (observed when CG-0121 was redirected into CG-0105).
+  if (isDashboardPage(page.url(), text)) {
+    const nextUp = await openCaseNextUpFromDashboard(page, createdCase).catch(() => ({ status: 'absent' }));
+    if (nextUp.status === 'opened') {
+      await page.waitForTimeout(1000);
+      return true;
+    }
+    await openCaseDetailsFromDashboard(page, createdCase, '').catch(() => {});
+    await page.waitForLoadState('networkidle').catch(() => {});
+    await page.waitForTimeout(1000);
+    return true;
+  }
+
   // Direct cross-rate link, when the page exposes one.
   const crossRateLink = page.locator(`a[href*="/cross-rate"][href*="mode=${options.mode}"]`).first();
   if (await crossRateLink.isVisible({ timeout: 750 }).catch(() => false)) {
@@ -3102,17 +3258,6 @@ async function openCrossPartyFactReviewIfRequired(page, createdCase, options) {
     return true;
   }
 
-  // On the dashboard with no control visible yet → open the case detail and retry.
-  if (isDashboardPage(page.url(), text)) {
-    const openedDetails = await openCaseDetailsFromDashboard(page, createdCase, '')
-      .then(() => true)
-      .catch(() => false);
-    if (openedDetails) {
-      await page.waitForLoadState('networkidle').catch(() => {});
-      await page.waitForTimeout(1000);
-      return true;
-    }
-  }
   return false;
 }
 
@@ -3136,9 +3281,9 @@ async function completeParticipantFactReview(page, config, createdCase, labelTex
 // at these labels matched only the third-person form and missed every own-party row.
 const WORKFLOW_STATUS_STEPS = [
   { key: 'share_perspective', own: /^share your perspective$/i, other: /\bshares? their perspective$/i },
-  { key: 'helpful_details', own: /^add helpful details$/i, other: /\badds? helpful details$/i },
-  { key: 'excerpt_review', own: /^review your excerpts$/i, other: /\breviews? their excerpts$/i },
-  { key: 'fact_rating', own: /^rate your supporting statements$/i, other: /\brates? their supporting statements$/i }
+  { key: 'clarify_improve', own: /^clarify\s*&\s*improve$/i, other: /\bclarifies?\s*&\s*improves?$/i },
+  { key: 'excerpt_review', own: /^excerpt review$/i, other: /\bexcerpt review$/i },
+  { key: 'statements', own: /^statements$/i, other: /\bstatements$/i }
 ];
 
 // Read the status list as ordered rows with a best-effort status per row.
@@ -3262,7 +3407,8 @@ const MAX_STATUS_REFRESHES = 24;
 
 async function completeCrossPartyFactReview(page, config, createdCase, labelText, options) {
   const startedAt = Date.now();
-  const waitName = `${capitalizeFirst(options.raterRole)} rating of ${options.ratedParty} facts`;
+  const actorLabel = options.actorLabel ?? capitalizeFirst(options.raterRole);
+  const waitName = `${actorLabel} rating of ${options.ratedParty} statements`;
   // A step this wait depends on may already have failed; polling would never resolve.
   await assertNoBlockingStageFailure(page, options.artifacts, waitName);
   let deadline = startedAt + config.run.postCompletionWaitMs;
@@ -3272,38 +3418,71 @@ async function completeCrossPartyFactReview(page, config, createdCase, labelText
   let gateSince = 0;
   let refreshes = 0;
   let lastRows = [];
-  // The requestor's return visit opens with their own Add Missing Perspective
-  // step (+ Confirm Additions when they saved perspectives); the rating stays
-  // 409-gated until it is done. Attempt it once from this wait.
-  let missingPerspectiveAttempted = false;
+  const handleMissingPerspective = options.handleMissingPerspective === true;
+  const requireMissingPerspective = options.requireMissingPerspective === true;
+  // On the employee's final visit, Add Missing Perspective is an explicit
+  // prerequisite to rating the manager's statements.
+  let missingPerspectiveAttempted = !handleMissingPerspective;
 
   while (Date.now() < deadline) {
     lastText = await readVisibleBodyText(page);
     lastUrl = page.url();
 
-    if (factLabelingReady(lastText, lastUrl)) {
-      await labelFactStatements(page, config, labelText);
-      return;
+    // Never inspect or act on another discussion after a dashboard transition.
+    // A stale global action used to land CG-0121 on completed CG-0105 and the
+    // rating wait then refreshed that unrelated case until timeout.
+    if (/\/cases\//i.test(lastUrl) && !reportMatchesCase(lastText, createdCase)) {
+      console.warn(`[workflow] Left ${createdCase?.commonGroundId ?? 'the target discussion'} for a different discussion; returning to its dashboard card.`);
+      await page.goto(new URL('/dashboard', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' });
+      await waitForDiscussionsLoaded(page);
+      await page.waitForTimeout(1000);
+      continue;
     }
 
-    if (!missingPerspectiveAttempted) {
-      const mpOutcome = await completeMissingPerspectiveIfPresent(page, options.artifacts, capitalizeFirst(options.raterRole ?? 'actor'));
+    const confirmAdditions = await completeConfirmAdditionsIfPresent(page, options.artifacts, actorLabel);
+    if (confirmAdditions.handled) {
+      // Confirm Additions is only reachable after Add Missing Perspective was submitted.
+      missingPerspectiveAttempted = true;
+      await page.waitForTimeout(1000);
+      continue;
+    }
+
+    if (requireMissingPerspective && !missingPerspectiveAttempted
+      && confirmAdditionsCompletedInStatus(lastText)) {
+      missingPerspectiveAttempted = true;
+      console.log(`[workflow] ${actorLabel}: Confirm Additions is recorded as View; prior Missing Perspective is complete.`);
+    }
+
+    if (handleMissingPerspective && !missingPerspectiveAttempted) {
+      const mpOutcome = await completeMissingPerspectiveIfPresent(page, options.artifacts, actorLabel);
       // Only a completed step ends the attempts. 'waiting' (other party not
       // done) and 'absent' must retry on later passes — the step becomes
       // ready mid-wait once the counterparty submits their review.
-      if (mpOutcome.mode === 'empty' || mpOutcome.mode === 'cards') missingPerspectiveAttempted = true;
+      if (mpOutcome.handled && (mpOutcome.mode === 'empty' || mpOutcome.mode === 'cards')) {
+        missingPerspectiveAttempted = true;
+      }
       if (mpOutcome.handled) {
         await page.waitForTimeout(1500);
         continue;
       }
     }
 
-    // Interposed between Missing Perspective and the rating step; it can appear
-    // on any pass (right after the MP submit), so it is checked every time
-    // rather than latched like the MP attempt above.
-    if ((await completeConfirmAdditionsIfPresent(page, options.artifacts, capitalizeFirst(options.raterRole ?? 'actor'))).handled) {
-      await page.waitForTimeout(1500);
+    // Never rate first when Missing Perspective is required. If Common Ground
+    // temporarily exposes the rating route while the prerequisite is still building,
+    // return to the exact discussion and wait for the approved step order.
+    if (requireMissingPerspective && !missingPerspectiveAttempted) {
+      if (factLabelingReady(lastText, lastUrl)) {
+        await page.goto(new URL('/dashboard', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' });
+        await waitForDiscussionsLoaded(page);
+      } else {
+        await page.waitForTimeout(1500);
+      }
       continue;
+    }
+
+    if (factLabelingReady(lastText, lastUrl)) {
+      await labelFactStatements(page, config, labelText);
+      return { missingPerspectiveCompleted: missingPerspectiveAttempted };
     }
 
     // Do not gate on one step's spinner. Common Ground can leave an earlier step in progress
@@ -3323,7 +3502,8 @@ async function completeCrossPartyFactReview(page, config, createdCase, labelText
         expected: 'Discussion Details steps complete in order.',
         observed: `${detail}. The tool stopped waiting on the earlier step and continued.`
       });
-      return;
+      // Do not claim the required rating is complete based on a status-list
+      // inconsistency. Continue until the actual rating surface is submitted.
     }
 
     // Gated on the other actor: this rating will never become available in this
@@ -3332,7 +3512,7 @@ async function completeCrossPartyFactReview(page, config, createdCase, labelText
     if (otherPartyGate(lastText)) {
       if (!gateSince) gateSince = Date.now();
       else if (Date.now() - gateSince >= OTHER_PARTY_GATE_CONFIRM_MS) {
-        throw new OtherPartyGateError(`${capitalizeFirst(options.raterRole)} rating of ${options.ratedParty} facts`, lastUrl, lastText);
+        throw new OtherPartyGateError(`${actorLabel} rating of ${options.ratedParty} statements`, lastUrl, lastText);
       }
     } else {
       gateSince = 0;
@@ -3356,7 +3536,7 @@ async function completeCrossPartyFactReview(page, config, createdCase, labelText
     }
 
     if (isDashboardPage(lastUrl, lastText)) {
-      const entered = await openCaseDetailsFromDashboard(page, createdCase, config.run.caseType)
+      const entered = await openCaseFromDashboard(page, createdCase, config.run.caseType)
         .then(() => true)
         .catch(() => false);
       if (entered) {
@@ -3444,7 +3624,10 @@ function reportMatchesCase(text, createdCase) {
 // link is unambiguous (the dashboard lists a report button per completed case).
 async function openCaseAlignmentReport(page, config, createdCase) {
   if (isDashboardPage(page.url(), await readVisibleBodyText(page))) {
-    await openCaseFromDashboard(page, createdCase, config.run.caseType).catch(() => {});
+    const nextUp = await openCaseNextUpFromDashboard(page, createdCase).catch(() => ({ status: 'absent' }));
+    if (nextUp.status !== 'opened') {
+      await openCaseFromDashboard(page, createdCase, config.run.caseType).catch(() => {});
+    }
     await waitForIdle(page);
   }
   const namePattern = /Alignment Report|Alignment Brief|View Alignment Brief|View Report|Open Report/i;
@@ -3453,12 +3636,128 @@ async function openCaseAlignmentReport(page, config, createdCase) {
     if (await control.isVisible({ timeout: 750 }).catch(() => false)) {
       await control.click().catch(() => {});
       await waitForIdle(page);
-      return;
+      return true;
     }
   }
   // The report link lives on the case detail page (reached via openCaseFromDashboard above);
   // no dashboard-card fallback — matching a state-specific card button is fragile and can
   // open the wrong case's report.
+  return false;
+}
+
+async function alignmentBriefAction(page) {
+  if (onAlignmentReportPage(page.url(), await readVisibleBodyText(page))) {
+    return { available: true, label: 'Alignment Brief report page' };
+  }
+  const pattern = /Alignment Brief|Alignment Report|View Report|Open Report/i;
+  for (const role of ['link', 'button']) {
+    const control = page.getByRole(role, { name: pattern }).first();
+    if (!await control.isVisible({ timeout: 500 }).catch(() => false)) continue;
+    if (!await control.isEnabled({ timeout: 300 }).catch(() => false)) continue;
+    if ((await control.getAttribute('aria-disabled').catch(() => null)) === 'true') continue;
+    return { available: true, label: (await control.innerText().catch(() => 'Your Alignment Brief')).trim() || 'Your Alignment Brief' };
+  }
+  return { available: false, label: '' };
+}
+
+// After the final cross-rating, revisit the exact case and finish anything that was deferred
+// while the other party was still working. A dashboard score is not completion: the live case
+// must expose an actionable Your Alignment Brief control.
+async function completeFinalEmployeeStepsAndWaitForBrief(page, config, createdCase, artifacts, labelText) {
+  const deadline = Date.now() + config.run.postCompletionWaitMs;
+  let lastText = '';
+  let lastUrl = page.url();
+  let lastRefreshAt = 0;
+  let repeatedAction = '';
+  let repeatedActionCount = 0;
+
+  await page.goto(new URL('/dashboard', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' });
+  await waitForDiscussionsLoaded(page);
+
+  while (Date.now() < deadline) {
+    lastText = await readVisibleBodyText(page);
+    lastUrl = page.url();
+
+    if (isDashboardPage(lastUrl, lastText)) {
+      const nextUp = await openCaseNextUpFromDashboard(page, createdCase).catch(() => ({ status: 'absent' }));
+      if (nextUp.status === 'opened') {
+        await waitForIdle(page);
+        await page.waitForTimeout(1500);
+        continue;
+      }
+      // Discussion Details is diagnostic fallback only. It must not replace an
+      // actionable case-card link, especially Your Alignment Brief.
+      await openCaseDetailsFromDashboard(page, createdCase, config.run.caseType).catch(() => {});
+      await waitForIdle(page);
+      await page.waitForTimeout(1500);
+      continue;
+    }
+
+    const confirmAdditions = await completeConfirmAdditionsIfPresent(page, artifacts, 'Employee');
+    if (confirmAdditions.handled) {
+      await page.waitForTimeout(1000);
+      continue;
+    }
+
+    const missingPerspective = await completeMissingPerspectiveIfPresent(page, artifacts, 'Employee');
+    if (missingPerspective.handled) {
+      await page.waitForTimeout(1500);
+      continue;
+    }
+
+    // A waiting Missing Perspective page is not complete. Return to the exact case and poll
+    // until the other party's data makes the cards actionable.
+    if (missingPerspective.mode === 'waiting') {
+      await page.goto(new URL('/dashboard', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' });
+      await waitForDiscussionsLoaded(page);
+      await page.waitForTimeout(2000);
+      continue;
+    }
+
+    if (factLabelingReady(lastText, lastUrl)) {
+      await labelFactStatements(page, config, labelText);
+      await page.waitForTimeout(1500);
+      continue;
+    }
+
+    const brief = await alignmentBriefAction(page);
+    if (brief.available) return brief;
+
+    // Open only the pending workflow action advertised by this discussion. The next
+    // iteration completes the page; opening it is never considered completion.
+    if (await openPendingWorkflowStep(page)) {
+      const signature = `${lastUrl} -> ${page.url()}`;
+      if (signature === repeatedAction) repeatedActionCount += 1;
+      else {
+        repeatedAction = signature;
+        repeatedActionCount = 1;
+      }
+      if (repeatedActionCount >= 3) {
+        throw new Error(
+          `Workflow loop detected while waiting for Your Alignment Brief: the same pending action was opened ${repeatedActionCount} times (${signature}).`
+        );
+      }
+      await page.waitForTimeout(1500);
+      continue;
+    }
+
+    if (Date.now() - lastRefreshAt >= 8000) {
+      await page.goto(new URL('/dashboard', config.productionUrl).toString(), { waitUntil: 'domcontentloaded' });
+      await waitForDiscussionsLoaded(page);
+      lastRefreshAt = Date.now();
+    } else {
+      await page.waitForTimeout(2000);
+    }
+  }
+
+  const screenshotPath = activeRunDir ? `${activeRunDir}/alignment-brief-not-ready.png` : null;
+  if (screenshotPath) await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
+  throw new Error([
+    `Your Alignment Brief for ${createdCase?.commonGroundId ?? 'the discussion'} did not become actionable within ${Math.round(config.run.postCompletionWaitMs / 60000)} minutes.`,
+    `Current URL: ${lastUrl}`,
+    `Last visible page text: ${compactVisibleText(lastText, 1800)}`,
+    screenshotPath ? `Screenshot: ${screenshotPath}` : ''
+  ].filter(Boolean).join('\n'));
 }
 
 async function waitForAndReadAlignmentReport(page, config, createdCase, artifacts = null) {
@@ -3520,19 +3819,8 @@ async function waitForAndReadAlignmentReport(page, config, createdCase, artifact
 
     // Not on a report and no report link visible yet: reopen this case / refresh.
     if (isDashboardPage(lastUrl, lastText)) {
-      // Fallback: the dashboard lists each case with "Latest Alignment: NN%" once
-      // its report has generated. Read it for the case under test rather than
-      // insisting on landing the single-case report page.
-      const dashboardScore = extractDashboardAlignmentScore(lastText, createdCase);
-      if (dashboardScore !== null) {
-        return {
-          score: dashboardScore,
-          source: 'dashboard',
-          url: lastUrl,
-          elapsedMs: Date.now() - startedAt,
-          visibleText: compactVisibleText(lastText, 4000)
-        };
-      }
+      // A dashboard score can exist while a required step remains actionable (CG-0105).
+      // It is useful diagnostic data, but it is not proof that Your Alignment Brief is ready.
       await openCaseAsRequestor(page, config, createdCase, { caseType: config.run.caseType }).catch(() => {});
       await waitForIdle(page);
     } else {
@@ -3603,16 +3891,13 @@ function extractDashboardAlignmentScore(text, createdCase) {
 }
 
 function onAlignmentReportPage(url = '', text = '') {
-  if (/alignment-report/i.test(String(url ?? ''))) return true;
+  if (/alignment-(?:report|brief)/i.test(String(url ?? ''))) return true;
   if (isDashboardPage(url, text)) return false;
   const value = String(text ?? '');
-  // Positive markers of the single-case report (vs. the dashboard's case list).
-  // "Current Alignment:" is the completed case-detail page, which prints the score directly
-  // ("Current Alignment: 78% / Above Threshold (75%)") — CG-0007 finished there and the score
-  // was never read because this predicate only knew the "NN/100" report layout.
-  return /\b\d{1,3}(?:\.\d+)?\s*\/\s*100\b/.test(value)
-    || /alignment\s+threshold/i.test(value)
-    || /current\s+alignment\s*:/i.test(value);
+  // Require report/brief identity, not merely "Current Alignment" on Discussion Details.
+  // The latter can display a score while Add Missing Perspective is still pending.
+  return /\b(?:Alignment Report|(?:Your\s+)?Alignment Brief)\b/i.test(value)
+    && (/\b\d{1,3}(?:\.\d+)?\s*\/\s*100\b/.test(value) || /alignment\s+threshold/i.test(value));
 }
 
 function alignmentScoreWithinExpectedRange(score, range) {
@@ -3755,6 +4040,19 @@ function extractCrossRateRemainingCount(text) {
 }
 
 function extractFactRatingProgress(text) {
+  const value = String(text ?? '');
+  if (/All statements have been successfully rated/i.test(value)) {
+    const statementNumbers = [...value.matchAll(/\bStatement\s+(\d+)\b/gi)]
+      .map((match) => Number(match[1]))
+      .filter(Number.isFinite);
+    const total = statementNumbers.length ? Math.max(...statementNumbers) : 0;
+    return {
+      completed: total,
+      remaining: 0,
+      total,
+      source: 'success-banner'
+    };
+  }
   const labeled = extractFactLabelCount(text);
   if (labeled) {
     return {
@@ -4159,11 +4457,49 @@ function participantFactRatingRequired(text) {
 }
 
 function isPostInterviewState(text) {
-  // "Excerpt Review" is the first screen after the interview ends (before fact
-  // labeling); recognizing it lets the interview loop exit cleanly and hand off to
-  // completeActorPostProcessing instead of waiting for a response input that will
-  // never reappear.
-  return /post-processing|post processing|fact statement|confident fact|statement labels?|submit labels?|label.*fact|excerpt review/i.test(text);
+  // Clarify & Improve / Add Helpful Details is now the first screen after the interview.
+  // Older deployments moved directly to Excerpt Review. Recognize both generations so
+  // the interview loop hands control to completeActorPostProcessing instead of waiting
+  // for a response composer that will never return.
+  return /post-processing|post processing|clarify\s*&\s*improve|clarify context|add helpful details?|helpful detail\s*\d+|fact statement|confident fact|statement labels?|submit labels?|label.*fact|excerpt review/i.test(text);
+}
+
+function interviewSubmissionAccepted({ visibleText = '', url = '', inputVisible = false, residual = '' } = {}) {
+  if (isPostInterviewState(visibleText)
+    || clarifyContextReady(visibleText, url)
+    || missingPerspectiveReady(visibleText, url)
+    || excerptReviewReady(visibleText, url)
+    || factLabelingReady(visibleText, url)) {
+    return { accepted: true, reason: 'advanced to post-interview processing' };
+  }
+  if (isProcessingState(visibleText)) {
+    return { accepted: true, reason: 'Common Ground is processing the submitted response' };
+  }
+  if (inputVisible && !String(residual ?? '').trim()) {
+    return { accepted: true, reason: 'response input was cleared' };
+  }
+  return { accepted: false, reason: 'response remains unconfirmed' };
+}
+
+async function inspectInterviewSubmission(page, config) {
+  const visibleText = await readVisibleBodyText(page);
+  const url = page.url();
+  const inputs = page.locator(config.selectors.partnerAi.responseInput);
+  const count = await inputs.count().catch(() => 0);
+  let inputVisible = false;
+  let residual = '';
+
+  for (let index = count - 1; index >= 0; index -= 1) {
+    const input = inputs.nth(index);
+    if (!await input.isVisible({ timeout: 100 }).catch(() => false)) continue;
+    inputVisible = true;
+    residual = await input.inputValue().catch(async () =>
+      input.evaluate((element) => element.value ?? element.textContent ?? '').catch(() => ''));
+    break;
+  }
+
+  const signal = interviewSubmissionAccepted({ visibleText, url, inputVisible, residual });
+  return { ...signal, visibleText, url, inputVisible, residual: String(residual ?? '').trim() };
 }
 
 function isProcessingState(text) {
@@ -4446,6 +4782,7 @@ function todayIso() {
 // Period To") gets filled; disabled/readOnly dates are skipped.
 async function fillPresentDates(page, value) {
   const dateSelector = 'input[type="date"]';
+  const requestedStartValue = requestedStartDateIso();
   for (let pass = 0; pass < 4; pass += 1) {
     const inputs = page.locator(dateSelector);
     const count = await inputs.count().catch(() => 0);
@@ -4454,13 +4791,32 @@ async function fillPresentDates(page, value) {
       const input = inputs.nth(index);
       if (!await input.isVisible().catch(() => false)) continue;
       if (!await input.isEditable().catch(() => false)) continue; // skips disabled/readOnly
-      if (await input.inputValue().catch(() => '')) continue;
-      await input.fill(value).catch(() => {});
+      const identity = await input.evaluate((element) => [
+        element.id,
+        element.getAttribute('name'),
+        element.getAttribute('aria-label'),
+        element.labels ? [...element.labels].map((label) => label.innerText).join(' ') : ''
+      ].filter(Boolean).join(' ')).catch(() => '');
+      const isRequestedStart = /requested[_\s-]*(?:case[_\s-]*)?start[_\s-]*date|requested discussion start date/i.test(identity);
+      const targetValue = isRequestedStart ? requestedStartValue : value;
+      const currentValue = await input.inputValue().catch(() => '');
+      if (currentValue === targetValue) continue;
+      // Preserve application-provided review-period dates, but always repair the
+      // requested start date because a prior submit can leave yesterday's value in it.
+      if (currentValue && !isRequestedStart) continue;
+      await input.fill(targetValue).catch(() => {});
       filledAny = true;
     }
     if (!filledAny) break;
     await page.waitForTimeout(300); // allow dependent date fields to enable/recompute
   }
+}
+
+// Common Ground validates this field against its UTC calendar day. Using the
+// runner's local date after UTC midnight makes an otherwise immediate discussion
+// fail as "in the past". UTC today is both accepted and immediately actionable.
+function requestedStartDateIso(now = new Date()) {
+  return now.toISOString().slice(0, 10);
 }
 
 // Fill the first visible, editable, currently-empty input matching the selector.
@@ -4492,14 +4848,24 @@ async function fillFirstEmpty(page, selector, value, label) {
 // auto-fills the logged-in party) we fall back to the previous "fill the empty party"
 // behavior, so this change is backward-compatible.
 async function fillCaseParties(page, selectors, config, syntheticCase, store) {
+  // Current manager-created form: the signed-in manager is rendered read-only and
+  // chooses a direct-report employee from #counterpart-picker. This is a distinct
+  // shape from the older employee-created form's "Select a manager" dropdown.
+  const employeeSelect = page.locator(selectors.employeeSelect ?? '#counterpart-picker').first();
+  const hasEmployeeDropdown = await employeeSelect.isVisible({ timeout: 2000 }).catch(() => false);
+  if (hasEmployeeDropdown) {
+    await selectEmployeeParty(page, employeeSelect, config.credentials.participant.email, store);
+    return { requestorRole: 'manager', participantRole: 'employee', source: 'employee-dropdown' };
+  }
+
   const managerSelect = page.locator(selectors.managerSelect).first();
   const hasManagerDropdown = await managerSelect.isVisible({ timeout: 5000 }).catch(() => false);
 
   if (hasManagerDropdown) {
-    await fillIfEmpty(page, selectors.employeeNameInput, syntheticCase.requestorName, 'employee (Party 1) name');
-    await fillIfEmpty(page, selectors.employeeEmailInput, config.credentials.requestor.email, 'employee (Party 1) email');
-    await selectManagerParty(page, managerSelect, config.credentials.participant.email, store);
-    return;
+    await fillIfEmpty(page, selectors.employeeNameInput, syntheticCase.participantName, 'employee (Party 2) name');
+    await fillIfEmpty(page, selectors.employeeEmailInput, config.credentials.participant.email, 'employee (Party 2) email');
+    await selectManagerParty(page, managerSelect, config.credentials.requestor.email, store);
+    return { requestorRole: 'manager', participantRole: 'employee', source: 'manager-dropdown' };
   }
 
   // Current staging design: the form resolves BOTH parties itself and renders them as
@@ -4509,15 +4875,18 @@ async function fillCaseParties(page, selectors, config, syntheticCase, store) {
   // lands on a case it was never invited to.
   const autoParties = await readAutoResolvedParties(page);
   if (autoParties) {
-    await verifyAutoResolvedParties(page, autoParties, config, store);
-    return;
+    return verifyAutoResolvedParties(page, autoParties, config, store);
   }
 
   // Legacy form: both parties are free text and the app auto-fills the logged-in one.
   if (await hasEmptyEditableInput(page, 'input[type="text"]')) {
     await fillFirstEmpty(page, 'input[type="text"]', syntheticCase.participantName, 'empty party name');
     await fillFirstEmpty(page, 'input[type="email"]', syntheticCase.participantEmail, 'empty party email');
-    return;
+    return {
+      requestorRole: config.run.requestorRole,
+      participantRole: config.run.requestorRole === 'employee' ? 'manager' : 'employee',
+      source: 'legacy-config-fallback'
+    };
   }
 
   // None of the known shapes matched. Previously we fell through to the legacy branch
@@ -4525,10 +4894,38 @@ async function fillCaseParties(page, selectors, config, syntheticCase, store) {
   // error about the wrong thing. Fail explicitly, with the form state attached.
   await failCaseForm(page, store, [
     'The New Discussion Request form matched none of the known shapes.',
-    `Expected one of: the "${selectors.managerSelect}" manager dropdown, read-only auto-resolved`,
+    `Expected one of: the "${selectors.employeeSelect ?? '#counterpart-picker'}" employee dropdown, `
+      + `the "${selectors.managerSelect}" manager dropdown, read-only auto-resolved`,
     'Party 1/Party 2 blocks, or legacy free-text party fields — none were present.',
     'The form has probably changed again; re-run `node scripts/launch.js scripts/inspectCaseForm.js` to see its current fields.'
   ].join(' '));
+}
+
+// Select the configured employee from the manager-side direct-report picker. The live
+// options currently omit email addresses, so prefer an email-local-part/name match and
+// accept a sole candidate. Multiple unmatched candidates are ambiguous and must fail.
+async function selectEmployeeParty(page, employeeSelect, employeeEmail, store) {
+  const options = await employeeSelect.locator('option').evaluateAll((items) =>
+    items.map((item) => ({ value: item.value, label: (item.textContent || '').trim(), disabled: item.disabled })));
+  const candidates = options.filter((item) => item.value && !item.disabled);
+  const localPart = String(employeeEmail ?? '').split('@')[0].split('+')[0].replace(/[^a-z0-9]+/gi, ' ').trim();
+  const words = localPart.split(/\s+/).filter((word) => word.length >= 3);
+  const matching = candidates.filter((candidate) => words.some((word) =>
+    new RegExp(`\\b${escapeRegExp(word)}\\b`, 'i').test(candidate.label)));
+  const selected = matching.length === 1
+    ? matching[0]
+    : candidates.length === 1 ? candidates[0] : null;
+
+  if (!selected) {
+    await failCaseForm(page, store,
+      `The Employee picker could not uniquely match the configured employee account. `
+      + `Selectable employees: ${candidates.map((candidate) => candidate.label).join(', ') || 'none'}.`);
+  }
+
+  await employeeSelect.selectOption(selected.value);
+  await page.waitForTimeout(500);
+  const selectedLabel = (await employeeSelect.locator('option:checked').textContent().catch(() => selected.label))?.trim() || selected.label;
+  console.log(`[case] Manager selected employee: "${selectedLabel}".`);
 }
 
 // Parse the read-only party blocks the redesigned form renders. Returns null when the
@@ -4566,7 +4963,22 @@ async function verifyAutoResolvedParties(page, parties, config, store) {
       + `Form shows: ${describe}. Refusing to submit a case the configured participant cannot accept.`);
   }
 
+  const requestorParty = [parties.party1, parties.party2]
+    .find((party) => party.email.toLowerCase() === requestorEmail);
+  const participantParty = [parties.party1, parties.party2]
+    .find((party) => party.email.toLowerCase() === participantEmail);
+  const roleOf = (party) => /manager/i.test(party?.role ?? '')
+    ? 'manager'
+    : /employee/i.test(party?.role ?? '') ? 'employee' : null;
+  const requestorRole = roleOf(requestorParty);
+  const participantRole = roleOf(participantParty);
+  if (!requestorRole || !participantRole || requestorRole === participantRole) {
+    await failCaseForm(page, store,
+      `Could not resolve distinct employee/manager roles from the live form. Form shows: ${describe}.`);
+  }
+
   console.log(`[case] Parties auto-resolved by the form — ${describe}.`);
+  return { requestorRole, participantRole, source: 'live-auto-resolved-parties' };
 }
 
 async function hasEmptyEditableInput(page, selector) {
@@ -5023,11 +5435,11 @@ function updateArtifactCaseId(artifacts, commonGroundId) {
 }
 
 async function openCaseFromDashboard(page, createdCase, caseType) {
-  // Open the case via its "Discussion Details" button — always present on the card
-  // regardless of case state — rather than clicking the (often non-navigating) heading or
-  // matching a state-specific action. clickCaseCardButton finds the card by its CG-id
-  // (waitForCaseCard) and clicks the button within it, landing on the case detail page.
+  // The exact discussion card is the workflow router in the current UI. Prefer
+  // its Next Up action and retain Discussion Details only as a fallback.
   try {
+    const nextUp = await openCaseNextUpFromDashboard(page, createdCase);
+    if (nextUp.status === 'opened') return;
     await clickCaseCardButton(page, createdCase, /^(Discussion Details|Case Details)$/i);
   } catch (error) {
     const dump = await dumpOpenCaseFailure(page, createdCase);
@@ -5037,6 +5449,51 @@ async function openCaseFromDashboard(page, createdCase, caseType) {
       + `Screenshot: ${dump.shot}. Visible text: ${dump.bodyText} (${error.message})`
     );
   }
+}
+
+// Click the active Next Up action on one exact discussion card. A plain-text
+// Next Up value means the other party owns the step and is not navigation.
+async function openCaseNextUpFromDashboard(page, createdCase) {
+  if (!isDashboardPage(page.url(), await readVisibleBodyText(page))) {
+    return { status: 'not-dashboard', label: '' };
+  }
+  await waitForCaseCard(page, createdCase);
+  const result = await page.evaluate((targets) => {
+    const norm = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
+    const headings = [...document.querySelectorAll('h1,h2,h3')];
+    const idTargets = targets.filter((target) => /^CG-\d+/i.test(target));
+    const aliasTargets = targets.filter((target) => !/^CG-\d+/i.test(target));
+    const findHeading = (list) => headings.find((element) => list.some((target) => target && norm(element.innerText).includes(target)));
+    const heading = findHeading(idTargets) ?? findHeading(aliasTargets);
+    if (!heading) return { status: 'card-missing', label: '' };
+
+    let card = heading;
+    for (let depth = 0; card && depth < 8; depth += 1, card = card.parentElement) {
+      const text = norm(card.innerText);
+      if (!/(Manager:|Employee:)/i.test(text) || !/Next\s*Up\s*:/i.test(text)) continue;
+      const controls = [...card.querySelectorAll('a,button,[role="button"]')]
+        .filter((element) => !element.disabled && element.getAttribute('aria-disabled') !== 'true');
+      const actionPattern = /Review Invitation|Share Your Perspective|Clarify\s*&\s*Improve|Add Helpful Details|Add Missing Perspective|Confirm(?: Your)? Additions|Excerpt Review|Statements|Rate .+ Supporting Statements|Your Alignment Brief|Alignment (?:Brief|Report)/i;
+      const action = controls.find((element) => {
+        const label = norm(element.innerText || element.getAttribute('aria-label'));
+        return actionPattern.test(label) && !/Discussion Details|Case Details/i.test(label);
+      });
+      if (action) {
+        const label = norm(action.innerText || action.getAttribute('aria-label'));
+        action.click();
+        return { status: 'opened', label };
+      }
+      const nextUp = text.match(/Next\s*Up\s*:\s*(.+?)(?:Discussion Details|Case Details|$)/i)?.[1] ?? '';
+      return { status: nextUp ? 'waiting' : 'absent', label: norm(nextUp) };
+    }
+    return { status: 'card-missing', label: '' };
+  }, caseSearchTargets(createdCase));
+
+  if (result.status === 'opened') {
+    await page.waitForLoadState('networkidle').catch(() => {});
+    console.log(`[workflow] Opened ${createdCase?.commonGroundId ?? 'discussion'} via dashboard Next Up: ${result.label}`);
+  }
+  return result;
 }
 
 async function openCaseDetailsFromDashboard(page, createdCase, caseType) {
@@ -5226,16 +5683,21 @@ export const workflowTestSupport = {
   selectScriptedAnswer,
   evaluateExpectedPartnerBehavior,
   interviewReadySignal,
+  interviewSubmissionAccepted,
   excerptReviewReady,
   clarifyContextReady,
+  missingPerspectiveReady,
+  confirmAdditionsReady,
+  confirmAdditionsCompletedInStatus,
   extractExcerptApprovalCount,
   extractFactLabelCount,
   extractCrossRateRemainingCount,
   extractFactRatingProgress,
   nextFactLabelControlIndex,
   findCaseIdsInText,
+  onNewDiscussionForm,
+  requestedStartDateIso,
   crossRateUrl,
   labelFactStatements,
-  fullWorkflowResultStatus,
-  factLabelingReady
+  fullWorkflowResultStatus
 };

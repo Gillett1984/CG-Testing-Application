@@ -74,6 +74,17 @@ export class ScenarioController {
     this.dossiers = null;
   }
 
+  setRequestorRole(requestorRole) {
+    if (!['employee', 'manager'].includes(requestorRole)) {
+      throw new Error(`Invalid resolved requestor role: ${requestorRole}`);
+    }
+    this.requestorRole = requestorRole;
+  }
+
+  getRequestorRole() {
+    return this.requestorRole;
+  }
+
   getPlan() {
     return structuredClone(this.plan);
   }
@@ -140,6 +151,41 @@ export class ScenarioController {
     return this.dossiers ? structuredClone(this.dossiers) : null;
   }
 
+  validateRoleContracts() {
+    if (!this.dossiers) throw new Error('Scenario dossiers must be loaded before validating actor role contracts.');
+
+    const contracts = {};
+    for (const actor of ['requestor', 'participant']) {
+      const domainRole = domainRoleForActor(actor, this.requestorRole);
+      const dossierKey = domainRole;
+      const ratingActor = domainRole === 'employee' ? 'requestor' : 'participant';
+      const dossier = this.dossiers[dossierKey];
+      if (!dossier) throw new Error(`${actor} resolved to ${domainRole}, but the ${dossierKey} dossier is missing.`);
+
+      const positions = new Map((dossier.termPositions ?? []).map((item) => [item.termId, item.ratingId]));
+      const mismatches = this.topic.terms.flatMap((term) => {
+        const expected = this.scenario.ratings[ratingActor]?.[term.id];
+        const actual = positions.get(term.id);
+        return expected === actual ? [] : [`${term.id}: expected ${expected}, dossier has ${actual ?? 'no rating'}`];
+      });
+      if (mismatches.length) {
+        throw new Error(`${actor} role contract is invalid (${domainRole}/${dossierKey} dossier): ${mismatches.join('; ')}.`);
+      }
+
+      contracts[actor] = {
+        domainRole,
+        dossier: dossierKey,
+        ratingSource: ratingActor,
+        perspective: domainRole === 'employee' ? 'employee_self_assessment' : 'manager_evaluating_employee'
+      };
+    }
+
+    if (contracts.requestor.domainRole === contracts.participant.domainRole) {
+      throw new Error('Requestor and participant resolved to the same domain role.');
+    }
+    return contracts;
+  }
+
   getScenarioContext(actor, primaryQuestionId, criterionId = undefined) {
     const question = this.topic.primaryQuestions.find((item) => item.id === primaryQuestionId);
     if (!question) throw new Error(`Unknown primary question: ${primaryQuestionId}`);
@@ -179,9 +225,11 @@ export class ScenarioController {
       terms: termIds.map((termId) => {
         const term = this.topic.terms.find((item) => item.id === termId);
         const sharedEvent = this.plan.sharedEvents.find((item) => item.termId === termId);
+        const domainRole = domainRoleForActor(actor, this.requestorRole);
+        const scenarioRatingActor = domainRole === 'employee' ? 'requestor' : 'participant';
         return {
           ...structuredClone(term),
-          ratingId: this.scenario.ratings[actor][termId],
+          ratingId: this.scenario.ratings[scenarioRatingActor][termId],
           sharedEvent: structuredClone(sharedEvent),
           interpretation: structuredClone(sharedEvent.actorInterpretations[actor])
         };

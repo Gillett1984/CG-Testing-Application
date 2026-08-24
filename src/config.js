@@ -117,11 +117,11 @@ export function loadConfig(args) {
     throw new Error(`${modeLabel} mode requires a Common Ground Case ID.`);
   }
 
-  // Resume mode replays the full workflow against an EXISTING case, skipping every phase
-  // before resumePhase. Defaults to the participant interview, the usual restart point
-  // after the requestor side has completed.
+  // Resume mode replays the full workflow against an EXISTING discussion, skipping every
+  // phase before resumePhase. The manager interview is the first phase after the employee
+  // completes their interview, processing, and the manager rates the employee's statements.
   const resumePhase = runMode === 'resume_case'
-    ? (cli.resumePhase ?? runConfig.resumePhase ?? 'participant_interview')
+    ? (cli.resumePhase ?? runConfig.resumePhase ?? 'manager_interview')
     : null;
   if (resumePhase && !WORKFLOW_PHASES.includes(resumePhase)) {
     throw new Error(`Unknown --resume-phase "${resumePhase}". Valid phases: ${WORKFLOW_PHASES.join(', ')}.`);
@@ -309,13 +309,11 @@ function defaultQualityCriteriaPath(caseType) {
 }
 
 // Per-topic default for which role the requestor holds — not a single global default.
-// Performance Review is manager-initiated (requestor = manager); a Raise Request is
-// employee-initiated in the natural case (requestor = employee, asking their manager).
-// Each is overridable per run (--requestor-role / runConfig.requestorRole) because a Raise
-// can be initiated from either side (e.g. a manager-role account creating one on staging).
+// Common Ground discussions are manager-created for every topic. Keep the field explicit
+// for artifact replay, but the full workflow verifies the live form agrees with this rule.
 const REQUESTOR_ROLE_BY_CASE_TYPE = [
   { pattern: /performance|review|coaching|evaluation|90.?day/i, role: 'manager' },
-  { pattern: /raise/i, role: 'employee' }
+  { pattern: /raise/i, role: 'manager' }
 ];
 function defaultRequestorRole(caseType = '') {
   const hit = REQUESTOR_ROLE_BY_CASE_TYPE.find((entry) => entry.pattern.test(String(caseType)));

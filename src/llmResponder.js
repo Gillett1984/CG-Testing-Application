@@ -2141,7 +2141,7 @@ function responseTokenBudget(input, isRetry = false) {
   // Sparse persona: mechanically cap initial/non-follow-up turns so detail
   // physically cannot be emitted until Partner AI coaxes (isFollowUpTurn).
   if (input.persona?.detail === 'sparse' && !input.turnClassification?.isFollowUpTurn) {
-    return isRetry ? 110 : 80;
+    return isRetry ? 240 : 180;
   }
 
   // Tight tiers for non-substantive turns.

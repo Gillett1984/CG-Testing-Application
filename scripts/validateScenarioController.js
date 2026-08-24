@@ -135,14 +135,27 @@ const sharedProjects = new Set(plan.sharedEvents.map((event) => event.facts.find
 assert.equal(sharedRoles.size, 1, 'All terms must use one employee role.');
 assert.equal(sharedProjects.size, 1, 'All terms must use one shared project.');
 
+first.setRequestorRole('manager');
 first.setDossiers(dossiersA);
-// Performance topics are manager-initiated (requestorRole defaults to 'manager'),
-// so the participant holds the employee role and the requestor the manager role.
-const dossierContext = first.getScenarioContext('participant', topic.primaryQuestions[0].id);
+const roleContracts = first.validateRoleContracts();
+assert.deepEqual(roleContracts.requestor, {
+  domainRole: 'manager',
+  dossier: 'manager',
+  ratingSource: 'participant',
+  perspective: 'manager_evaluating_employee'
+}, 'Manager requestor must use the manager dossier and manager scenario ratings.');
+assert.deepEqual(roleContracts.participant, {
+  domainRole: 'employee',
+  dossier: 'employee',
+  ratingSource: 'requestor',
+  perspective: 'employee_self_assessment'
+}, 'Employee participant must use the employee dossier and employee scenario ratings.');
+// The canonical workflow resolves the requestor as manager and participant as employee.
+const dossierContext = first.getScenarioContext('requestor', topic.primaryQuestions[0].id);
 assert.equal(dossierContext.canonicalProfile.employeeRole, dossiersA.employee.canonicalProfile.employeeRole, 'Runtime scenario context must use the generated dossier role.');
-assert.ok(dossierContext.dossierAnswer.startsWith('I believe my work in this area was excellent'), 'Participant runtime context must retrieve the employee dossier answer.');
-const requestorDossierContext = first.getScenarioContext('requestor', topic.primaryQuestions[0].id);
-assert.ok(requestorDossierContext.dossierAnswer.startsWith('I believe the employee performed poorly'), 'Requestor runtime context must retrieve the manager dossier answer.');
+assert.ok(dossierContext.dossierAnswer.startsWith('I believe the employee performed poorly'), 'Requestor runtime context must retrieve the manager dossier answer.');
+const participantDossierContext = first.getScenarioContext('participant', topic.primaryQuestions[0].id);
+assert.ok(participantDossierContext.dossierAnswer.startsWith('I believe my work in this area was excellent'), 'Participant runtime context must retrieve the employee dossier answer.');
 assert.equal(dossierContext.scenarioExpression.primaryQuestionId, topic.primaryQuestions[0].id, 'Runtime context must include the active question relationship.');
 assert.ok(first.getPlan().sharedEvents.every((event) => event.facts.some((fact) => fact.includes(dossiersA.employee.canonicalProfile.employeeRole))), 'Dossier facts must replace the preliminary scenario role in every shared event.');
 

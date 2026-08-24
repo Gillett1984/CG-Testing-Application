@@ -143,7 +143,7 @@ function buildRunReport(config, summary) {
       `  Common Ground Case ID: ${item.caseId ?? 'not detected'}`,
       `  Synthetic Reference: ${item.syntheticReference ?? ''}`,
       `  Completed Getting Started: ${item.completedGettingStarted ?? false}`,
-      `  Workflow Completed Through Final Fact Rating: ${item.workflowCompleted ?? false}`,
+      `  Workflow Reached Your Alignment Brief: ${item.workflowCompleted ?? false}`,
       `  Status Basis: ${item.statusBasis ?? 'interview result'}`,
       `  Requestor Getting Started: ${item.requestorGettingStartedCompleted ?? false}`,
       `  Participant Getting Started: ${item.participantGettingStartedCompleted ?? false}`,
@@ -263,9 +263,9 @@ function csvCell(value) {
 }
 
 function formatRunMode(runMode) {
-  if (runMode === 'full_workflow') return 'Full Requestor + Participant Workflow';
+  if (runMode === 'full_workflow') return 'Full Manager + Employee Workflow';
   if (runMode === 'fact_labeling_smoke') return 'Fact Labeling Smoke Test';
   return runMode === 'participant_getting_started'
-    ? 'Participant Getting Started'
-    : 'Requestor Getting Started';
+    ? 'Employee Share Your Perspective'
+    : 'Manager Share Your Perspective';
 }

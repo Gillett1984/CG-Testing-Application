@@ -4,8 +4,8 @@ export function buildSyntheticCase({ topic, caseType, participantEmail }) {
 
   return {
     caseType: caseType ?? topic,
-    participantName: `Synthetic Participant ${shortId}`,
-    requestorName: `Synthetic Employee ${shortId}`,
+    participantName: `Synthetic Employee ${shortId}`,
+    requestorName: `Synthetic Manager ${shortId}`,
     title: `SYNTHETIC TEST DATA - ${topic} - ${stamp}`,
     topic,
     participantEmail,
