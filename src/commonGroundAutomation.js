@@ -2084,7 +2084,53 @@ async function completeActorPostProcessing(page, config, artifacts, actorLabel, 
   });
   await labelFactStatements(page, config, labelText);
   recordStage(artifacts, `${actorLabel} Fact Statement Labels`, 'passed', `All fact statements labeled ${labelText} and submitted.`);
+
+  // Before handing off to the other actor, settle any of THIS actor's steps that
+  // are still outstanding. The workflow order is not fixed: Missing Perspective
+  // used to appear between Clarify and Excerpt Review, but since pair-diff became
+  // the primary gap source it can be built later, and a submit that navigates
+  // straight to Excerpt Review carries the tool past the one moment it looked
+  // (CG-0173: MP was never opened, sat in_progress, and 409-gated the other
+  // party's cross-rating forever). Rather than assume an order, re-read the app's
+  // own pending step and clear it.
+  await settleOutstandingOwnSteps(page, config, artifacts, actorLabel);
 }
+
+// Complete any remaining step that still belongs to this actor, driven by the
+// app's own "Next:" pointer rather than an assumed sequence. Bounded, and only
+// ever acts on steps this actor can actually complete.
+async function settleOutstandingOwnSteps(page, config, artifacts, actorLabel) {
+  for (let pass = 0; pass < 3; pass += 1) {
+    await ensureOnDashboard(page, config);
+    const opened = await openCaseDetailsFromDashboard(page, artifacts.case, config.run.caseType)
+      .then(() => true).catch(() => false);
+    if (!opened) return;
+    await waitForIdle(page);
+    await waitForCaseDetailLoaded(page);
+    if (!await openPendingWorkflowStep(page)) return;
+
+    const text = await readVisibleBodyText(page);
+    if (missingPerspectiveReady(text, page.url())) {
+      const outcome = await completeMissingPerspectiveStep(page, artifacts, actorLabel);
+      if (!outcome.handled) return;
+      continue;
+    }
+    if (clarifyContextReady(text, page.url())) {
+      await skipClarifyContext(page, config, actorLabel);
+      continue;
+    }
+    if (excerptReviewReady(text, page.url())) {
+      await submitExcerptReview(page, config);
+      continue;
+    }
+    if (factLabelingReady(text, page.url())) {
+      await labelFactStatements(page, config, config.run.scenarioFoundation.topic.workflow.factStatementLabel);
+      continue;
+    }
+    return;
+  }
+}
+
 
 function excerptReviewReady(text, url = '') {
   const value = String(text ?? '');
