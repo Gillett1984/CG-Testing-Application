@@ -4,6 +4,7 @@ import { buildSyntheticCase } from './syntheticData.js';
 import { generatePartnerAiResponse, generateScenarioDossiers, verifyOpenAiConnectivity } from './llmResponder.js';
 import { extractPromptContext } from './promptContext.js';
 import { WORKFLOW_PHASES } from './workflowPhases.js';
+import { WORKFLOW_STATUS_STEP_KEYS, WORKFLOW_STEP_LABELS } from './workflowLabels.js';
 import { evaluateManeuverSuccess, evaluatePolicyAdvanceStop, findActiveManeuver } from './testManeuvers.js';
 import { createScenarioController } from './scenarioController.js';
 import { matchScenarioQuestion, matchScenarioQuestionScored, matchScenarioCriterion, textSimilarity } from './questionMatching.js';
@@ -2090,7 +2091,7 @@ function excerptReviewReady(text, url = '') {
   const currentUrl = String(url ?? '');
   if (factReviewUrl(currentUrl)) return false;
   if (/\/excerpt-review(?:[/?#]|$)/i.test(currentUrl)) return true;
-  return /\bExcerpt Review\b/i.test(value)
+  return /\bExcerpt Review\b|\bReview\s*(?:&|and)\s*Approve Excerpts\b/i.test(value)
     && /(\d+)\s*\/\s*(\d+)\s+approved/i.test(value)
     && /\bSubmit\b/i.test(value);
 }
@@ -2105,7 +2106,7 @@ function clarifyContextReady(text, url = '') {
   // Staging renamed this step: "Clarify Context" -> "Clarify & Improve" in the tab strip
   // and "Add Helpful Details" in the case Status list, and replaced the "N/M reviewed"
   // counter with numbered "Helpful Detail N" cards. Match old and new wording.
-  const stepHeading = /\bClarify Context\b|\bClarify\s*&\s*Improve\b|\bAdd Helpful Details?\b|\bHelpful Detail\s*\d+\b/i.test(value);
+  const stepHeading = /\bClarify Context\b|\bClarify\s*&\s*Improve\b|\bAdd Helpful Details?\b|\bAdd Clarity\b|\bHelpful Detail\s*\d+\b/i.test(value);
   return stepHeading
     && /\bSubmit\s*&?\s*Continue\b/i.test(value)
     && (/(\d+)\s*\/\s*(\d+)\s+reviewed/i.test(value) || /\bHelpful Detail\s*\d+\b/i.test(value));
@@ -2166,13 +2167,8 @@ async function skipClarifyContext(page, config, actorLabel = 'actor') {
 }
 
 // Step pages reachable from the Discussion Details status list via its "Next: <step>" link.
-const PENDING_STEP_LINKS = [
-  { name: /Add Helpful Details/i, route: /\/clarify-context/i },
-  { name: /Add Missing Perspective/i, route: /\/missing-perspective/i },
-  { name: /Confirm Your Additions/i, route: /\/(?:confirm-additions|new-evidence)/i },
-  { name: /Review Your Excerpts/i, route: /\/excerpt-review/i },
-  { name: /Rate (?:Your|[\w'’-]+'?s) Supporting Statements/i, route: /\/(?:fact-review|cross-rate)/i }
-];
+const PENDING_STEP_LINKS = ['clarify_context', 'missing_perspective', 'excerpt_review', 'fact_rating']
+  .map((key) => ({ name: WORKFLOW_STEP_LABELS[key].link, route: WORKFLOW_STEP_LABELS[key].route }));
 
 function missingPerspectiveReady(text, url = '') {
   const value = String(text ?? '');
@@ -2184,6 +2180,18 @@ function missingPerspectiveReady(text, url = '') {
 // variant offers. The step has three presentations and only the first carries a
 // Continue button, so a single hard-coded exit strands the run on the others.
 // Returns a short label naming the exit used.
+// The Missing Perspective step's own reviewed counter, or null when it shows none.
+// Used to prove every item is answered before submitting: an incomplete submit is
+// rejected with 400 and rolled back, losing the answers already given.
+async function readMissingPerspectiveProgress(page) {
+  return page.evaluate(() => {
+    const text = String(document.body?.innerText ?? '').replace(/\s+/g, ' ');
+    const counter = text.match(/(\d+)\s*\/\s*(\d+)\s+reviewed/i);
+    if (!counter) return null;
+    return { reviewed: Number(counter[1]), total: Number(counter[2]) };
+  }).catch(() => null);
+}
+
 async function leaveMissingPerspectiveStep(page) {
   for (const [label, locator] of [
     ['Continue', page.getByRole('button', { name: /^Continue$/i }).first()],
@@ -2264,23 +2272,37 @@ async function completeMissingPerspectiveStep(page, artifacts, actorLabel) {
   if (mode === 'cards') {
     recordStage(artifacts, `${actorLabel} Missing Perspective`, 'started');
     let declined = 0;
-    // Spec caps items at 10; each "I Don't Know" disables after tapping.
-    for (let round = 0; round < 15; round += 1) {
+    // EVERY item must be answered or skipped before submitting. Since
+    // 2026-08-25 the API rejects an incomplete submit with 400 and rolls the
+    // whole step back ("N of M still unreviewed; nothing was saved"), so a
+    // partial pass silently loses the work and leaves the step open, which in
+    // turn keeps cross-rating 409-gated. Drive the step's own reviewed counter
+    // to full rather than trusting that every button was found.
+    for (let round = 0; round < 20; round += 1) {
+      const progress = await readMissingPerspectiveProgress(page);
+      if (progress && progress.reviewed >= progress.total && progress.total > 0) break;
       const buttons = await page.getByRole('button', { name: /I Don'?t Know/i }).all();
       let clicked = false;
       for (const button of buttons) {
-        if (!await button.isVisible().catch(() => false)) continue;
-        if (!await button.isEnabled().catch(() => false)) continue;
-        await button.scrollIntoViewIfNeeded().catch(() => {});
-        if (await button.click({ timeout: 5000 }).then(() => true).catch(() => false)) {
-          declined += 1;
-          clicked = true;
-          await page.waitForTimeout(600);
-          break;
-        }
+        if (!await clickWhenActionable(button)) continue;
+        declined += 1;
+        clicked = true;
+        await page.waitForTimeout(600);
+        break;
       }
       if (!clicked) break;
     }
+
+    const progress = await readMissingPerspectiveProgress(page);
+    if (progress && progress.total > 0 && progress.reviewed < progress.total) {
+      artifacts?.softAssertions?.push({
+        type: 'missing_perspective_items_unreviewed',
+        passed: false,
+        expected: 'Every Missing Perspective item is answered or skipped before submitting.',
+        observed: `${progress.reviewed}/${progress.total} reviewed; the remaining items exposed no actionable control, so the submit will be rejected and rolled back.`
+      });
+    }
+
     const submit = page.getByRole('button', { name: /^Submit$/i }).first();
     let submitted = false;
     if (await submit.isVisible({ timeout: 2000 }).catch(() => false)
@@ -2726,7 +2748,11 @@ async function clickWhenActionable(locator) {
   if (!await locator.isEnabled({ timeout: 500 }).catch(() => false)) return false;
   if ((await locator.getAttribute('aria-disabled').catch(() => null)) === 'true') return false;
   await locator.scrollIntoViewIfNeeded().catch(() => {});
-  return locator.click({ timeout: 3000 }).then(() => true).catch(() => false);
+  // 20s, not 3s: since 2026-08-25 approving an excerpt awaits an LLM remap
+  // classifier server-side (REMAP_TIMEOUT_SECONDS = 12), so a click can legitimately
+  // block far longer than a UI interaction normally would. A short timeout here
+  // reads a slow server as a dead control and abandons work that did land.
+  return locator.click({ timeout: 20000 }).then(() => true).catch(() => false);
 }
 
 async function submitExcerptReview(page, config) {
@@ -3134,12 +3160,11 @@ async function completeParticipantFactReview(page, config, createdCase, labelTex
 // ("Add Helpful Details") and once per other party in third person ("Esha adds helpful
 // details"). Verified against the live CG-0004 Discussion Details markup — an earlier guess
 // at these labels matched only the third-person form and missed every own-party row.
-const WORKFLOW_STATUS_STEPS = [
-  { key: 'share_perspective', own: /^share your perspective$/i, other: /\bshares? their perspective$/i },
-  { key: 'helpful_details', own: /^add helpful details$/i, other: /\badds? helpful details$/i },
-  { key: 'excerpt_review', own: /^review your excerpts$/i, other: /\breviews? their excerpts$/i },
-  { key: 'fact_rating', own: /^rate your supporting statements$/i, other: /\brates? their supporting statements$/i }
-];
+const WORKFLOW_STATUS_STEPS = WORKFLOW_STATUS_STEP_KEYS.map((key) => ({
+  key,
+  own: WORKFLOW_STEP_LABELS[key].own,
+  other: WORKFLOW_STEP_LABELS[key].other
+}));
 
 // Read the status list as ordered rows with a best-effort status per row.
 //
@@ -3447,7 +3472,7 @@ async function openCaseAlignmentReport(page, config, createdCase) {
     await openCaseFromDashboard(page, createdCase, config.run.caseType).catch(() => {});
     await waitForIdle(page);
   }
-  const namePattern = /Alignment Report|Alignment Brief|View Alignment Brief|View Report|Open Report/i;
+  const namePattern = WORKFLOW_STEP_LABELS.alignment_brief.link;
   for (const role of ['link', 'button']) {
     const control = page.getByRole(role, { name: namePattern }).first();
     if (await control.isVisible({ timeout: 750 }).catch(() => false)) {
@@ -3719,7 +3744,7 @@ async function selectAllFactStatementLabels(page, config, labelText) {
       continue;
     }
     await control.scrollIntoViewIfNeeded().catch(() => {});
-    const clicked = await control.click({ timeout: 3000 }).then(() => true).catch(() => false);
+    const clicked = await control.click({ timeout: 20000 }).then(() => true).catch(() => false);
     if (!clicked) {
       await page.waitForTimeout(500);
       continue;
@@ -3981,7 +4006,7 @@ async function dismissTourOverlay(page, where = '') {
 
   for (const [label, control] of attempts) {
     if (!await control.isVisible({ timeout: 0 }).catch(() => false)) continue;
-    await control.click({ timeout: 3000 }).catch(() => {});
+    await control.click({ timeout: 20000 }).catch(() => {});
     await page.waitForTimeout(400);
     if (!await tourStillVisible(page)) {
       console.log(`[tour] Dismissed product tour overlay via "${label}" on ${location}.`);
