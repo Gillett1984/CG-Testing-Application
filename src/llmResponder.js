@@ -395,24 +395,79 @@ export function coverageAllowance(input) {
   return { points, sentences, words: Math.max(120, sentences * 32) };
 }
 
-// The Partner AI scoring contract, restated as generation rules. A criterion
-// counts only when one quotable sentence FULLY satisfies it: the grader is
-// explicit that naming is not detailing, listing is not connecting, and stating
-// is not explaining. One mandatory criterion left partial caps the turn at 75,
-// which is Moderate, which earns another probe — measured on CG-0088, where 12
-// of 23 manager turns scored exactly 75 and each cost about a minute.
-function coverageInstruction(input) {
-  const { points, sentences, words } = coverageAllowance(input);
-  return [
-    points
-      ? `The answer guidance lists ${points} coverage point(s). Keep the required opening sentence first, then write at least one distinct sentence for each point, in the order listed.`
-      : 'Keep the required opening sentence first, then write one distinct sentence for each coverage point the guidance lists, in the order listed.',
-    'Each sentence must fully satisfy its own point: name the specific thing, give a concrete anchor (a number, date, document, or role), and state the consequence that followed. Implied or adjacent coverage does not count.',
-    'When a point asks about "each" of several items, name only two or three items and fully cover every one you name; partial coverage of a longer list counts for nothing.',
-    'When your assigned stance disputes an outcome the prompt assumes, answer the linkage explicitly in negative form using the pattern: what actually happened (with its number or date), the standard or expectation it fell short of, and the consequence that followed. "Quality was uneven" is not an answer; "the 1.2% error rate exceeded the 0.5% acceptance bar, so the March sign-off slipped three weeks" is.',
-    'Do not hedge with words like somewhat, generally, broadly, or to some extent; hedged coverage is scored as partial.',
-    `Use up to about ${sentences} short sentences (~${words} words). Never drop a coverage point to stay short.`
-  ].join(' ');
+// The criteria Partner AI actually scores, as an explicit block. These are the
+// source of truth: `answerGuidance` is UI copy and does not map one-to-one to
+// them (project_review Q1 shows 7 bullets against 8 scored criteria), so an
+// answer aimed at the bullets can miss a gate-critical requirement entirely.
+// Mandatory criteria must ALL be met or the turn caps at 75 and is probed again.
+function criteriaSourceOfTruth(input) {
+  const criteria = input?.activeQualityCriteria?.highQualityCriteria ?? [];
+  if (!criteria.length) return null;
+  const mandatory = criteria.filter((item) => item.required === true);
+  const voluntary = criteria.filter((item) => item.required !== true);
+  const requirement = input?.activeQualityCriteria?.voluntaryCoverageRequirement;
+  return {
+    mandatory: mandatory.map((item) => item.requirement).filter(Boolean),
+    voluntary: voluntary.map((item) => item.requirement).filter(Boolean),
+    voluntaryCoverageRequirement: requirement ?? '50%'
+  };
+}
+
+// True when the assigned stance for this turn is a negative rating. A negative
+// stance is the point of a misaligned scenario: Partner AI SHOULD probe such an
+// answer, and those follow-ups are the behaviour under test, not a defect.
+function assignedStanceIsNegative(input) {
+  const terms = input?.scenarioTurn?.scenarioContext?.terms ?? [];
+  const ratings = terms.map((term) => term.interpretation?.ratingId).filter(Boolean);
+  if (!ratings.length) return false;
+  return ratings.every((rating) => rating === 'unsatisfactory' || rating === 'needs_improvement');
+}
+
+// What a full-coverage turn must do, expressed against the SCORED criteria and
+// shaped by the assigned stance.
+//
+// Aligned/positive stance: satisfy every criterion in one turn so the question
+// advances cleanly - that is the happy path being verified.
+//
+// Negative stance: the evaluative criteria are answered in the assigned negative
+// position and will legitimately read as incomplete to the grader, which is
+// exactly the probing behaviour a misaligned scenario exists to exercise. The
+// identifying, stance-neutral criteria (project name, role, responsibilities)
+// are still stated plainly, so the interview can still progress to the end
+// instead of stalling on facts nobody disputes.
+export function coverageInstruction(input) {
+  const criteria = criteriaSourceOfTruth(input);
+  const negative = assignedStanceIsNegative(input);
+  const lines = ['Keep the required opening sentence first.'];
+
+  if (criteria?.mandatory.length) {
+    lines.push(
+      `Partner AI scores this answer against ${criteria.mandatory.length} mandatory requirement(s), and every one of them must be satisfied outright:`,
+      criteria.mandatory.map((text, index) => `(${index + 1}) ${text}`).join(' '),
+      'Satisfy each with its own sentence that a reader could quote as fully meeting it. Implied or adjacent coverage does not count.'
+    );
+    if (criteria.voluntary.length) {
+      lines.push(`Then cover at least ${criteria.voluntaryCoverageRequirement} of these supporting requirements: ${criteria.voluntary.map((text, index) => `(${index + 1}) ${text}`).join(' ')}`);
+    }
+  } else {
+    lines.push('Cover every point the answer guidance lists, each in its own sentence.');
+  }
+
+  if (negative) {
+    lines.push(
+      'Your assigned stance is a negative rating, so do NOT manufacture favourable evidence to satisfy a requirement. State any requirement that is purely identifying — the project, your role, what was assigned — plainly and factually, because those are not in dispute and the interview cannot progress without them.',
+      'Answer every evaluative requirement in the assigned negative position, using what actually happened, the standard it fell short of, and the consequence. "Quality was uneven" is not an answer; "the 1.2% error rate exceeded the 0.5% acceptance bar, so the March sign-off slipped three weeks" is.',
+      'It is correct and expected for Partner AI to ask a follow-up after this; do not soften the position to avoid one.'
+    );
+  } else {
+    lines.push(
+      'Your assigned stance supports the outcome, so satisfy every requirement above in this single answer with concrete specifics — a number, a date, a named document or person — so the question can be completed in one turn.'
+    );
+  }
+
+  lines.push('Do not hedge with words like somewhat, generally, broadly, or to some extent; hedged coverage is scored as partial.');
+  lines.push('Write as long as the requirements need and no longer. Never pad, and never drop a requirement to stay short.');
+  return lines.join(' ');
 }
 
 // A turn that must cover every answer-guidance point of the active question in

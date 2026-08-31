@@ -142,3 +142,35 @@ for (const [name, first, revised, text, shouldDowngrade] of downgradeCases) {
   assert.equal(Boolean(outcome), shouldDowngrade, `Downgrade policy wrong for: ${name}`);
 }
 console.log(`Downgrade policy: ${downgradeCases.length} cases behave correctly.`);
+
+// 4. COVERAGE IS AIMED AT THE SCORED CRITERIA, AND SHAPED BY THE STANCE.
+// answerGuidance is UI copy: project_review Q1 shows 7 bullets against 8 scored
+// criteria, 4 of them mandatory. An answer aimed at the bullets can miss a
+// gate-critical requirement, which caps the turn at 75 and earns another probe.
+// The stance then decides what to do with them — an aligned run should complete
+// a question in one turn, while a misaligned run SHOULD draw follow-ups, since
+// that probing is the product behaviour under test.
+const { coverageInstruction } = await import('../src/llmResponder.js');
+const projectReview = JSON.parse(fs.readFileSync(path.join(rootDir, 'config/case-types/project-review.json'), 'utf8'));
+const firstQuestion = projectReview.primaryQuestions[0];
+const mandatoryCount = firstQuestion.highQualityCriteria.filter((c) => c.required === true).length;
+const withStance = (ratingId) => ({
+  activeQualityCriteria: firstQuestion,
+  scenarioTurn: { scenarioContext: { terms: [{ interpretation: { ratingId } }] } }
+});
+
+const aligned = coverageInstruction(withStance('outstanding'));
+const misaligned = coverageInstruction(withStance('unsatisfactory'));
+
+for (const [name, text] of [['aligned', aligned], ['misaligned', misaligned]]) {
+  assert.ok((text.match(/\(\d\)/g) ?? []).length >= mandatoryCount,
+    `${name}: every mandatory requirement must be named in the instruction.`);
+  assert.ok(text.includes(firstQuestion.highQualityCriteria[0].requirement),
+    `${name}: the instruction must quote the real criterion text, not the UI guidance.`);
+}
+assert.ok(/single answer|one turn/i.test(aligned), 'An aligned stance must aim to complete the question in one turn.');
+assert.ok(!/expected for Partner AI to ask a follow-up/i.test(aligned), 'An aligned stance must not invite follow-ups.');
+assert.ok(/do NOT manufacture favourable/i.test(misaligned), 'A negative stance must not invent favourable evidence to satisfy a criterion.');
+assert.ok(/purely identifying/i.test(misaligned), 'A negative stance must still state undisputed identifying facts so the interview can progress.');
+assert.ok(/expected for Partner AI to ask a follow-up/i.test(misaligned), 'A negative stance must treat follow-ups as expected behaviour under test.');
+console.log(`Coverage targeting: aimed at ${mandatoryCount} scored mandatory criteria; aligned completes in one turn, misaligned expects follow-ups.`);
