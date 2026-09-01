@@ -67,3 +67,17 @@ export const WORKFLOW_STATUS_STEP_KEYS = [
   'excerpt_review',
   'fact_rating'
 ];
+
+// Each step's own URL segment, relative to the case page.
+//
+// Labels are the volatile part - five of six were renamed in a single release -
+// and the status list does not even name its controls after the step: the row
+// reads "Add Missing Perspective" but the only clickable thing in it is called
+// "View". These paths have not moved through any of that, so they are the
+// reliable way into a step when no control can be matched by name.
+export const WORKFLOW_STEP_PATHS = {
+  clarify_context: 'clarify-context',
+  missing_perspective: 'missing-perspective',
+  excerpt_review: 'excerpt-review',
+  fact_rating: 'fact-review'
+};

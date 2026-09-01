@@ -4,7 +4,7 @@ import { buildSyntheticCase } from './syntheticData.js';
 import { generatePartnerAiResponse, generateScenarioDossiers, verifyOpenAiConnectivity } from './llmResponder.js';
 import { extractPromptContext } from './promptContext.js';
 import { WORKFLOW_PHASES } from './workflowPhases.js';
-import { WORKFLOW_STATUS_STEP_KEYS, WORKFLOW_STEP_LABELS } from './workflowLabels.js';
+import { WORKFLOW_STATUS_STEP_KEYS, WORKFLOW_STEP_LABELS, WORKFLOW_STEP_PATHS } from './workflowLabels.js';
 import { evaluateManeuverSuccess, evaluatePolicyAdvanceStop, findActiveManeuver } from './testManeuvers.js';
 import { createScenarioController } from './scenarioController.js';
 import { matchScenarioQuestion, matchScenarioQuestionScored, matchScenarioCriterion, textSimilarity } from './questionMatching.js';
@@ -2237,7 +2237,7 @@ async function skipClarifyContext(page, config, actorLabel = 'actor') {
 
 // Step pages reachable from the Discussion Details status list via its "Next: <step>" link.
 const PENDING_STEP_LINKS = ['clarify_context', 'missing_perspective', 'excerpt_review', 'fact_rating']
-  .map((key) => ({ name: WORKFLOW_STEP_LABELS[key].link, route: WORKFLOW_STEP_LABELS[key].route }));
+  .map((key) => ({ name: WORKFLOW_STEP_LABELS[key].link, route: WORKFLOW_STEP_LABELS[key].route, path: WORKFLOW_STEP_PATHS[key] }));
 
 function missingPerspectiveReady(text, url = '') {
   const value = String(text ?? '');
@@ -2506,36 +2506,74 @@ async function completeMissingPerspectiveIfPresent(page, artifacts, actorLabel) 
   return completeMissingPerspectiveStep(page, artifacts, actorLabel);
 }
 
-// On the case detail page, open the step the app says is next. No-op when already on a step
-// route, so it is safe to call before any post-processing wait.
+// Open whichever workflow step the case page is pointing at.
+//
+// Driven by the app's own "Next:" pointer rather than by trying steps in a
+// fixed order, so a reordered workflow cannot send us into the wrong screen.
+// Three affordances are tried, because the status list has changed shape more
+// than once and unpromoted environments still ship the older ones:
+//   1. a control whose own accessible name is the step ("Add Clarity")
+//   2. the row carrying the step's label, whose control is merely named "View"
+//   3. the step's own URL, which has outlived every relabelling
+//
+// A click only counts once the URL actually lands on the step's route; a
+// control that looks right but goes nowhere falls through to the next
+// candidate. CG-0183 stalled for ten minutes on "Next: Add Missing
+// Perspective" because the sole actionable control in that row is called
+// "View", so matching on the step's name alone found nothing to click at all.
 async function openPendingWorkflowStep(page) {
-  const url = page.url();
-  if (PENDING_STEP_LINKS.some((step) => step.route.test(url))) return false;
+  if (PENDING_STEP_LINKS.some((step) => step.route.test(page.url()))) return false;
 
-  for (const step of PENDING_STEP_LINKS) {
+  const caseBase = page.url().replace(/[?#].*$/, '').replace(/\/+$/, '');
+  const pointer = await readPendingStepLabel(page);
+  // Whatever the app says is next comes first; the rest stay as fallbacks for
+  // pages that render no pointer.
+  const ordered = pointer
+    ? [...PENDING_STEP_LINKS].sort((a, b) => Number(b.name.test(pointer)) - Number(a.name.test(pointer)))
+    : PENDING_STEP_LINKS;
+
+  const settle = async () => {
+    await page.waitForLoadState('networkidle').catch(() => {});
+    await page.waitForTimeout(2500);
+  };
+
+  for (const step of ordered) {
+    const named = step.name.test(pointer || '');
+    const candidates = [];
     for (const role of ['link', 'button']) {
-      // Try EVERY match, not just the first. A step's wording appears more than
-      // once on the case detail page — as the actionable "Next:" pointer and
-      // again as a greyed status-list row — so taking .first() can pick a dead
-      // one and abandon a step that was perfectly reachable (CG-0183: the tool
-      // sat on "Next: Add Missing Perspective" for ten minutes without opening it).
-      const matches = await page.getByRole(role, { name: step.name }).all().catch(() => []);
-      for (const control of matches) {
-        if (!await control.isVisible({ timeout: 750 }).catch(() => false)) continue;
-        if (!await control.isEnabled({ timeout: 500 }).catch(() => false)) continue;
-        if ((await control.getAttribute('aria-disabled').catch(() => null)) === 'true') continue;
-        await control.scrollIntoViewIfNeeded().catch(() => {});
-        const before = page.url();
-        if (!await control.click({ timeout: 10000 }).then(() => true).catch(() => false)) continue;
-        await page.waitForLoadState('networkidle').catch(() => {});
-        await page.waitForTimeout(2500);
-        // A click that did not move us has not opened the step; keep looking.
-        if (page.url() === before && !step.route.test(page.url())) continue;
-        console.log('[workflow] Opened the pending step -> ' + page.url());
-        return true;
-      }
+      candidates.push(...await page.getByRole(role, { name: step.name }).all().catch(() => []));
     }
+    const rows = page.locator('li, tr, [class*="row"], [class*="item"]').filter({ hasText: step.name });
+    for (const role of ['link', 'button']) {
+      candidates.push(...await rows.getByRole(role, { name: /^View$/i }).all().catch(() => []));
+    }
+
+    for (const control of candidates) {
+      if (!await control.isVisible({ timeout: 750 }).catch(() => false)) continue;
+      if (!await control.isEnabled({ timeout: 500 }).catch(() => false)) continue;
+      if ((await control.getAttribute('aria-disabled').catch(() => null)) === 'true') continue;
+      await control.scrollIntoViewIfNeeded().catch(() => {});
+      if (!await control.click({ timeout: 10000 }).then(() => true).catch(() => false)) continue;
+      await settle();
+      if (!step.route.test(page.url())) continue;
+      console.log('[workflow] Opened "' + (pointer || 'the pending step') + '" -> ' + page.url());
+      return true;
+    }
+
+    // The route itself, only for the step the app actually named. Navigating
+    // blind would risk reopening a step that is already done.
+    if (!named || !step.path) continue;
+    await page.goto(caseBase + '/' + step.path, { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await settle();
+    if (step.route.test(page.url())) {
+      console.log('[workflow] Opened "' + pointer + '" by its route -> ' + page.url());
+      return true;
+    }
+    await page.goto(caseBase, { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await settle();
   }
+
+  if (pointer) console.warn('[workflow] Could not open the step the case page points at: "' + pointer + '".');
   return false;
 }
 
