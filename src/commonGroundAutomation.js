@@ -4891,6 +4891,11 @@ async function selectCaseType(page, requestedType) {
 
 function caseCreationPlan(requestedType) {
   const value = String(requestedType ?? '').toLowerCase();
+  // "CG Project Review" also contains "project", so it must be resolved before
+  // plain Project Review or it would be routed to the wrong card.
+  if (/^cg[\s_-]*project/.test(value)) {
+    return { tab: /Performance Review/i, card: 'CG Project Review', fallbackTabs: [/Discussion Request/i] };
+  }
   // Project Review contains "review", so it must be resolved before the
   // Performance Review family. Its card mirrors the performance topics but the
   // tab is not documented anywhere backend-side, hence the fallback.

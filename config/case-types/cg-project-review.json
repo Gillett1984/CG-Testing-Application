@@ -1,0 +1,234 @@
+{
+  "schemaVersion": 2,
+  "topicId": "cg_project_review",
+  "caseType": "CG Project Review",
+  "description": "QA collaboration review between the Common Ground Product Manager and QA Specialist, scoped to how they are working together on the Common Ground project itself.",
+  "workflow": {
+    "actors": [
+      "requestor",
+      "participant"
+    ],
+    "factStatementLabel": "Confident Fact",
+    "postProcessingTimeoutMs": 600000
+  },
+  "terms": [
+    {
+      "id": "cgpr_role_expectations",
+      "label": "Role & Expectations",
+      "description": "Each person’s role, responsibilities, ownership areas, and the expectations understood to guide the QA work."
+    },
+    {
+      "id": "cgpr_product_knowledge",
+      "label": "Product Knowledge & QA Readiness",
+      "description": "The Common Ground product knowledge needed for effective QA, and whether it has been developed."
+    },
+    {
+      "id": "cgpr_qa_quality",
+      "label": "QA Quality & Reliability",
+      "description": "The quality, thoroughness, and reliability of the QA work produced."
+    },
+    {
+      "id": "cgpr_ownership",
+      "label": "Ownership & Initiative",
+      "description": "Ownership taken, initiative shown, and follow-through on QA commitments."
+    },
+    {
+      "id": "cgpr_communication",
+      "label": "Communication & Coordination",
+      "description": "How the two coordinated, raised issues, and kept each other informed."
+    }
+  ],
+  "ratingScale": [
+    {
+      "id": "unsatisfactory",
+      "label": "Unsatisfactory",
+      "score": 0,
+      "responseProfile": {
+        "stance": "Performance consistently falls materially short of expectations.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "needs_improvement",
+      "label": "Needs Improvement",
+      "score": 1,
+      "responseProfile": {
+        "stance": "Performance has meaningful gaps and requires focused improvement.",
+        "evidenceStrength": "moderate",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "meets_expectations",
+      "label": "Meets Expectations",
+      "score": 2,
+      "responseProfile": {
+        "stance": "Performance reliably fulfills the expectations of the role.",
+        "evidenceStrength": "moderate",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "exceeds_expectations",
+      "label": "Exceeds Expectations",
+      "score": 3,
+      "responseProfile": {
+        "stance": "Performance frequently surpasses normal expectations.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    },
+    {
+      "id": "outstanding",
+      "label": "Outstanding",
+      "score": 4,
+      "responseProfile": {
+        "stance": "Performance significantly and consistently surpasses expectations.",
+        "evidenceStrength": "strong",
+        "evidenceMix": [
+          "quantitative",
+          "qualitative"
+        ]
+      }
+    }
+  ],
+  "primaryQuestions": [
+    {
+      "id": "cgpr_q1",
+      "discussionArea": "Role, Expectations & Product Understanding",
+      "question": "How well aligned have you and the other person been on the QA Specialist's role, responsibilities, expectations, and the product knowledge needed to perform the role effectively?",
+      "primaryTermId": "cgpr_role_expectations",
+      "answerGuidance": [
+        "Your understanding of your own role, responsibilities, and areas of ownership on the project",
+        "What you understood the other person to be responsible for and expected to own",
+        "The priorities, quality standards, expected behaviors, and outcomes you believed should guide QA work",
+        "How those expectations were communicated and how clearly you believe they were understood",
+        "The level of Common Ground product knowledge you believe is needed for effective QA and whether that knowledge has been developed",
+        "Any important differences you believe exist between your understanding and the other person's understanding of the role or expectations"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "cgpr_q1_m1",
+          "requirement": "Describes the participant's understanding of their own role, responsibilities, and areas of ownership on the Common Ground project",
+          "required": true,
+          "label": "CG Project Review",
+          "termIds": [
+            "cgpr_role_expectations"
+          ]
+        },
+        {
+          "id": "cgpr_q1_m2",
+          "requirement": "Describes what the participant understood the other person's role, responsibilities, and areas of ownership to be",
+          "required": true,
+          "label": "CG Project Review",
+          "termIds": [
+            "cgpr_role_expectations"
+          ]
+        },
+        {
+          "id": "cgpr_q1_m3",
+          "requirement": "Identifies the expectations, priorities, quality standards, or desired outcomes the participant understood should guide the QA work",
+          "required": true,
+          "label": "CG Project Review",
+          "termIds": [
+            "cgpr_role_expectations"
+          ]
+        },
+        {
+          "id": "cgpr_q1_m4",
+          "requirement": "Explains how clearly those expectations, priorities, standards, or desired outcomes were communicated and understood",
+          "required": true,
+          "label": "CG Project Review",
+          "termIds": [
+            "cgpr_communication"
+          ]
+        },
+        {
+          "id": "cgpr_q1_m5",
+          "requirement": "Describes the participant's perspective on whether sufficient knowledge of the Common Ground application, its intended user experience, workflows, and expected outcomes has been developed to perform the QA role effectively",
+          "required": true,
+          "label": "CG Project Review",
+          "termIds": [
+            "cgpr_product_knowledge"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "0%"
+    },
+    {
+      "id": "cgpr_q2",
+      "discussionArea": "QA Execution & Working Relationship",
+      "question": "How effectively have you and the other person worked together to perform the QA function, including work quality, ownership and follow-through, communication and coordination, and what would need to improve?",
+      "primaryTermId": "cgpr_qa_quality",
+      "answerGuidance": [
+        "The quality, thoroughness, reliability, and effectiveness of QA work completed on the project",
+        "How independently QA work moves forward and the amount of direction, follow-up, or oversight typically required",
+        "Examples of initiative, ownership, follow-through, issue escalation, or process improvement",
+        "How communication between Product and QA has worked, including clarity, responsiveness, understanding, feedback, and follow-through",
+        "How QA and Development leadership coordinate on defects, handoffs, priorities, status, fixes, and verification",
+        "The changes in expectations, behavior, communication, process, support, or ownership that would have the greatest positive impact"
+      ],
+      "highQualityCriteria": [
+        {
+          "id": "cgpr_q2_m1",
+          "requirement": "Describes the participant's perspective on the quality, thoroughness, reliability, and effectiveness of QA work performed during the project",
+          "required": true,
+          "label": "CG Project Review",
+          "termIds": [
+            "cgpr_qa_quality"
+          ]
+        },
+        {
+          "id": "cgpr_q2_m2",
+          "requirement": "Describes the participant's perspective on ownership, initiative, follow-through, and the degree of direction or oversight required to move QA work forward",
+          "required": true,
+          "label": "CG Project Review",
+          "termIds": [
+            "cgpr_ownership"
+          ]
+        },
+        {
+          "id": "cgpr_q2_m3",
+          "requirement": "Describes how communication and collaboration between the Product Manager and QA Specialist have typically worked, including clarity, responsiveness, understanding, feedback, and follow-through",
+          "required": true,
+          "label": "CG Project Review",
+          "termIds": [
+            "cgpr_communication"
+          ]
+        },
+        {
+          "id": "cgpr_q2_m4",
+          "requirement": "Describes how communication, coordination, handoffs, issue escalation, and information sharing between QA and Development leadership have supported or hindered the timely identification, resolution, and verification of product issues",
+          "required": true,
+          "label": "CG Project Review",
+          "termIds": [
+            "cgpr_communication"
+          ]
+        },
+        {
+          "id": "cgpr_q2_m5",
+          "requirement": "Identifies the most important changes in expectations, behavior, communication, process, support, or ownership that the participant believes would make the working relationship and QA function more effective",
+          "required": true,
+          "label": "CG Project Review",
+          "termIds": [
+            "cgpr_ownership"
+          ]
+        }
+      ],
+      "voluntaryCoverageRequirement": "0%"
+    }
+  ]
+}
