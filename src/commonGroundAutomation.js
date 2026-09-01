@@ -2349,6 +2349,9 @@ async function completeMissingPerspectiveStep(page, artifacts, actorLabel) {
       });
     }
 
+    // The Submit control enables a beat after the final item is answered, so
+    // let the page settle before deciding it is absent.
+    await page.waitForTimeout(1500);
     const submit = page.getByRole('button', { name: /^Submit$/i }).first();
     let submitted = false;
     if (await submit.isVisible({ timeout: 2000 }).catch(() => false)
@@ -3362,7 +3365,12 @@ async function completeCrossPartyFactReview(page, config, createdCase, labelText
       // Only a completed step ends the attempts. 'waiting' (other party not
       // done) and 'absent' must retry on later passes — the step becomes
       // ready mid-wait once the counterparty submits their review.
-      if (mpOutcome.mode === 'empty' || mpOutcome.mode === 'cards') missingPerspectiveAttempted = true;
+      // Latch only on a step that actually CLOSED. A cards pass can answer every
+      // item and still find no Submit control (the control appears a beat later);
+      // latching on mode alone left the step open, which keeps cross-rating
+      // 409-gated and times the wait out. The participant recovered on a retry,
+      // the requestor never got one (CG-0180).
+      if (mpOutcome.mode === 'empty' || mpOutcome.submitted === true) missingPerspectiveAttempted = true;
       if (mpOutcome.handled) {
         await page.waitForTimeout(1500);
         continue;
