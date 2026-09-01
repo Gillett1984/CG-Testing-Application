@@ -1560,7 +1560,11 @@ async function runPartnerAiInterviewTurns(page, config, transcript, options = {}
     }
 
     await responseInput.fill(response);
-    await click(page, config.selectors.partnerAi.sendButton, 'Partner AI send');
+    // A click timeout is not proof the send failed: the button can be dispatched
+    // while the page is briefly unresponsive, and the message still lands. Let the
+    // input-cleared check below decide, rather than ending an hour-long run on it.
+    await click(page, config.selectors.partnerAi.sendButton, 'Partner AI send')
+      .catch((error) => console.warn('[interview] Send click did not settle; verifying whether it landed. ' + String(error).slice(0, 90)));
     // Verify the send actually happened: the app clears the input on success.
     // A click landing during a re-render can silently miss (observed on
     // CG-0082: the full response sat in the textarea, Partner AI never
@@ -2099,15 +2103,34 @@ async function completeActorPostProcessing(page, config, artifacts, actorLabel, 
 // Complete any remaining step that still belongs to this actor, driven by the
 // app's own "Next:" pointer rather than an assumed sequence. Bounded, and only
 // ever acts on steps this actor can actually complete.
+// What the case detail page says is next, for diagnostics when a sweep finds
+// nothing of its own to do.
+async function readPendingStepLabel(page) {
+  return page.evaluate(() => {
+    const text = String(document.body?.innerText ?? '').replace(/\s+/g, ' ');
+    const m = text.match(/Next:\s*([^.]{3,60}?)(?:\s{2,}|Details|Reports|Status|$)/i);
+    return m ? m[1].trim() : '';
+  }).catch(() => '');
+}
+
 async function settleOutstandingOwnSteps(page, config, artifacts, actorLabel) {
   for (let pass = 0; pass < 3; pass += 1) {
     await ensureOnDashboard(page, config);
     const opened = await openCaseDetailsFromDashboard(page, artifacts.case, config.run.caseType)
       .then(() => true).catch(() => false);
-    if (!opened) return;
+    if (!opened) {
+      // Silence here hid a stranded step that gated the other party for the rest
+      // of the run (CG-0183). Say what was not reachable.
+      console.warn(`[workflow] ${actorLabel}: could not open ${artifacts.case?.commonGroundId ?? 'the case'} from the dashboard to settle remaining steps.`);
+      return;
+    }
     await waitForIdle(page);
     await waitForCaseDetailLoaded(page);
-    if (!await openPendingWorkflowStep(page)) return;
+    if (!await openPendingWorkflowStep(page)) {
+      const pending = await readPendingStepLabel(page);
+      console.log(`[workflow] ${actorLabel}: no further step of mine to settle${pending ? ` (the case is waiting on: ${pending})` : ''}.`);
+      return;
+    }
 
     const text = await readVisibleBodyText(page);
     if (missingPerspectiveReady(text, page.url())) {
@@ -2491,15 +2514,26 @@ async function openPendingWorkflowStep(page) {
 
   for (const step of PENDING_STEP_LINKS) {
     for (const role of ['link', 'button']) {
-      const control = page.getByRole(role, { name: step.name }).first();
-      if (!await control.isVisible({ timeout: 750 }).catch(() => false)) continue;
-      if (!await control.isEnabled({ timeout: 500 }).catch(() => false)) continue;
-      await control.scrollIntoViewIfNeeded().catch(() => {});
-      if (!await control.click({ timeout: 5000 }).then(() => true).catch(() => false)) continue;
-      await page.waitForLoadState('networkidle').catch(() => {});
-      await page.waitForTimeout(2500);
-      console.log(`[workflow] Opened the pending step via its "${step.name.source.replace(/\\/g, '')}" link → ${page.url()}`);
-      return true;
+      // Try EVERY match, not just the first. A step's wording appears more than
+      // once on the case detail page — as the actionable "Next:" pointer and
+      // again as a greyed status-list row — so taking .first() can pick a dead
+      // one and abandon a step that was perfectly reachable (CG-0183: the tool
+      // sat on "Next: Add Missing Perspective" for ten minutes without opening it).
+      const matches = await page.getByRole(role, { name: step.name }).all().catch(() => []);
+      for (const control of matches) {
+        if (!await control.isVisible({ timeout: 750 }).catch(() => false)) continue;
+        if (!await control.isEnabled({ timeout: 500 }).catch(() => false)) continue;
+        if ((await control.getAttribute('aria-disabled').catch(() => null)) === 'true') continue;
+        await control.scrollIntoViewIfNeeded().catch(() => {});
+        const before = page.url();
+        if (!await control.click({ timeout: 10000 }).then(() => true).catch(() => false)) continue;
+        await page.waitForLoadState('networkidle').catch(() => {});
+        await page.waitForTimeout(2500);
+        // A click that did not move us has not opened the step; keep looking.
+        if (page.url() === before && !step.route.test(page.url())) continue;
+        console.log('[workflow] Opened the pending step -> ' + page.url());
+        return true;
+      }
     }
   }
   return false;
