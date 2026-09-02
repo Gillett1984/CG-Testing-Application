@@ -337,3 +337,25 @@ assert.ok(/const stillOurs = pointerNamesOwnStep\(await readPendingStepLabel\(pa
   'the "all my steps are complete" short-circuit must also check the pending-step pointer');
 
 console.log(`Status rows: ${WORKFLOW_STATUS_STEP_KEYS.length} steps parsed, missing perspective gated and never skipped.`);
+
+// The two screens that reach labelFactStatements do not share vocabulary: an
+// actor's own fact review counts "9/9 labeled", a cross-rate screen counts
+// "12/12 rated" and says outright that it is read-only. Matching only "labeled"
+// let a finished cross-rate screen read as unrated, so the tool tried to
+// re-rate 12 submitted statements (CG-0187). Checked against the engine's own
+// source so a narrowed pattern cannot pass here while failing live.
+const fsas = engineSrc2.match(/async function factStatementsAlreadySubmitted\(page\) \{[\s\S]*?\n\}/);
+assert.ok(fsas, 'factStatementsAlreadySubmitted must exist');
+assert.ok(/labell\?ed\|rated/.test(fsas[0]),
+  'the submitted-counter must accept both "labeled" and "rated" wording');
+assert.ok(/view\[- \]only|already been rated for this discussion/.test(fsas[0]),
+  'an explicitly view-only screen must count as already submitted');
+
+console.log('Fact-rating idempotency: "labeled", "rated" and view-only screens all read as done.');
+
+// `node --check` only parses. A stray character left by a patch script can be
+// syntactically valid ("a" followed by a comment is an expression statement) and
+// still throw ReferenceError the moment the module loads - which is exactly how
+// a broken edit reached a live run today. Import it for real.
+await import('../src/commonGroundAutomation.js');
+console.log('Engine import: module loads cleanly.');

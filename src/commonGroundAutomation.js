@@ -1994,14 +1994,21 @@ async function countFactStatements(page) {
 // How long an "already finished" reading must hold before a wait accepts it and moves on.
 const STEP_ALREADY_DONE_CONFIRM_MS = 15000;
 
-// True when every statement is labelled and the submit control is spent — the live page shows
-// "9/9 labeled" beside a disabled "Submitted" button. Re-rating here would either no-op or
-// overwrite a completed step, and waiting would burn the full timeout.
+// True when this screen's ratings are already in and nothing more can be done on
+// it. Two screens reach here and they do NOT share vocabulary: an actor's own
+// fact review counts "9/9 labeled", while a cross-rate screen counts "12/12
+// rated" and states outright that it is read-only. Matching only "labeled" let a
+// finished cross-rate screen look unrated, so the tool tried to re-rate 12
+// submitted statements and failed the stage (CG-0187).
 async function factStatementsAlreadySubmitted(page) {
   return page.evaluate(() => {
     const norm = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
     const text = norm(document.body?.innerText);
-    const counter = text.match(/(\d+)\s*\/\s*(\d+)\s+labell?ed/i);
+
+    // The app saying so outright beats any counter.
+    if (/this screen is view[- ]only|already been rated for this discussion/i.test(text)) return true;
+
+    const counter = text.match(/(\d+)\s*\/\s*(\d+)\s+(?:labell?ed|rated)/i);
     if (!counter || Number(counter[1]) < Number(counter[2]) || Number(counter[2]) === 0) return false;
     return [...document.querySelectorAll('button,[role="button"],input[type="submit"]')].some((node) => {
       const label = norm(node.innerText || node.value || '');
