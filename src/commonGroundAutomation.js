@@ -2663,14 +2663,27 @@ async function openPendingWorkflowStep(page) {
   const caseBase = page.url().replace(/[?#].*$/, '').replace(/\/+$/, '');
   const pointer = await readPendingStepLabel(page);
 
-  // Drive from what the app says is next, or do not drive at all. Without a
-  // pointer nothing distinguishes a step still waiting for us from one already
-  // finished - every completed step keeps rendering its link - so the old blind
-  // sweep through all four could only ever guess.
-  if (!pointer) return false;
+  // The status list, not the pointer, decides whether WE have work here.
+  //
+  // The app's "Next:" pointer describes the case, not this actor: it can name
+  // the counterpart's row while one of our own rows is still pending. Requiring
+  // the pointer to name one of our steps therefore refused to open Rabia's own
+  // pending Missing Perspective, because the page was pointing at Esha's
+  // (CG-0188). Read our rows and act on them; use the pointer only to choose
+  // which of ours to try first.
+  const ownOutstanding = (await readWorkflowStatusList(page).catch(() => []))
+    .filter((row) => row.person === 'you' && (row.status === 'pending' || row.status === 'in-progress'))
+    .map((row) => row.key);
 
+  // Nothing of ours is outstanding and the app is not pointing at one of our
+  // steps: there is genuinely nothing to open.
+  if (!ownOutstanding.length && !pointerNamesOwnStep(pointer)) return false;
+
+  const wanted = new Set(ownOutstanding);
   const ordered = [...PENDING_STEP_LINKS]
-    .sort((a, b) => Number(b.name.test(pointer)) - Number(a.name.test(pointer)));
+    .filter((step) => !wanted.size || wanted.has(step.key) || step.name.test(pointer))
+    .sort((a, b) => (Number(b.name.test(pointer)) - Number(a.name.test(pointer)))
+      || (Number(wanted.has(b.key)) - Number(wanted.has(a.key))));
 
   const settle = async () => {
     await page.waitForLoadState('networkidle').catch(() => {});

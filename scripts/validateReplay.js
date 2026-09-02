@@ -359,3 +359,19 @@ console.log('Fact-rating idempotency: "labeled", "rated" and view-only screens a
 // a broken edit reached a live run today. Import it for real.
 await import('../src/commonGroundAutomation.js');
 console.log('Engine import: module loads cleanly.');
+
+// The "Next:" pointer describes the CASE, not the signed-in actor. On CG-0188 it
+// read "Esha adds missing perspective" while Rabia's own Missing Perspective row
+// was pending - so a rule requiring the pointer to name one of our steps refused
+// to open a step that was genuinely ours and waiting. The status list is the
+// authority on that; the pointer only orders which of ours to try first.
+const openerSrc = engineSrc2.match(/async function openPendingWorkflowStep\(page\) \{[\s\S]*?\n\}/);
+assert.ok(openerSrc, 'openPendingWorkflowStep must exist');
+assert.ok(/readWorkflowStatusList/.test(openerSrc[0]),
+  'the opener must consult the status list, not the pointer alone');
+assert.ok(/ownOutstanding/.test(openerSrc[0]),
+  'the opener must derive its work from our own outstanding rows');
+assert.ok(/isDashboardPage/.test(openerSrc[0]), 'the dashboard guard must remain');
+assert.ok(/stepIsAlreadyDone/.test(openerSrc[0]), 'the completed-step guard must remain');
+
+console.log('Opener authority: outstanding rows drive it, the pointer only orders them.');
