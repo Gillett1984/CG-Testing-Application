@@ -117,6 +117,25 @@ export function loadConfig(args) {
     throw new Error(`${modeLabel} mode requires a Common Ground Case ID.`);
   }
 
+  // Asking to resume and getting a brand-new case instead is the worst possible
+  // outcome of a flag clash: it is silent, it costs a full run to notice, and it
+  // leaves a second live case behind. --resume-phase only sets resume_case mode
+  // when no mode was given, so "--run-mode full_workflow --resume-phase X" used
+  // to drop both the phase and the case id and create a case from scratch.
+  const wantedResume = cli.resumePhase ?? runConfig.resumePhase;
+  const wantedCaseId = normalizeCaseId(cli.existingCaseId ?? runConfig.existingCaseId);
+  if (wantedResume && runMode !== 'resume_case') {
+    throw new Error(
+      `--resume-phase "${wantedResume}" needs Resume Case mode, but this run is "${runMode}". `
+      + 'Drop --run-mode (resume is inferred) or pass --run-mode resume_case.'
+    );
+  }
+  if (wantedCaseId && !caseIdModes.includes(runMode)) {
+    throw new Error(
+      `--existing-case-id ${wantedCaseId} cannot be used with "${runMode}" mode, which creates a new case. `
+      + `Use one of: ${caseIdModes.join(', ')}.`
+    );
+  }
   // Resume mode replays the full workflow against an EXISTING case, skipping every phase
   // before resumePhase. Defaults to the participant interview, the usual restart point
   // after the requestor side has completed.

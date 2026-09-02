@@ -1920,6 +1920,41 @@ async function waitForPostProcessing(page, config) {
   return false;
 }
 
+// Common Ground can fail its own post-processing and say so on the page:
+// "Post-processing encountered an issue: Post-processing timeout - please
+// refresh the page", together with "Your responses were saved. You can still
+// proceed to review your excerpts" and a Continue control.
+//
+// The work is not lost and the way forward is on screen, but nothing advances
+// on its own, so a wait polling for the next step spends its whole timeout
+// staring at the offer. CG-0184 burned ten minutes on exactly this.
+function postProcessingFailed(text) {
+  const value = String(text ?? '');
+  if (/post-?processing\s+(?:encountered an issue|timed?\s*out|failed)/i.test(value)) return true;
+  return /post-?processing timeout/i.test(value);
+}
+
+// Take the app at its word and click through its own recovery offer. Returns
+// true only when a control was actually clicked, so a page with no way forward
+// falls through to the caller's existing refresh budget rather than looping.
+async function recoverFromFailedPostProcessing(page, actorLabel = 'Actor') {
+  if (!postProcessingFailed(await readVisibleBodyText(page))) return false;
+
+  for (const name of [/Continue to Excerpt Review/i, /^Continue$/i]) {
+    for (const role of ['button', 'link']) {
+      const control = page.getByRole(role, { name }).first();
+      if (!await control.isVisible({ timeout: 500 }).catch(() => false)) continue;
+      if (!await control.isEnabled({ timeout: 500 }).catch(() => false)) continue;
+      if (!await control.click({ timeout: 10000 }).then(() => true).catch(() => false)) continue;
+      await page.waitForLoadState('networkidle').catch(() => {});
+      await page.waitForTimeout(2000);
+      console.warn(`[post-processing] ${actorLabel}: the app reported a post-processing timeout and offered a way on; took it -> ${page.url()}`);
+      return true;
+    }
+  }
+  return false;
+}
+
 async function labelFactStatements(page, config, labelText) {
   // Instrumented so the cost of this step can be attributed rather than guessed:
   // waiting for Common Ground to extract and render the statements is its time,
@@ -3426,6 +3461,10 @@ async function completeCrossPartyFactReview(page, config, createdCase, labelText
   while (Date.now() < deadline) {
     lastText = await readVisibleBodyText(page);
     lastUrl = page.url();
+
+    // The app has told us its post-processing failed and offered a way on.
+    // Nothing else here will advance until that offer is taken.
+    if (await recoverFromFailedPostProcessing(page, capitalizeFirst(options.raterRole ?? 'actor'))) continue;
 
     if (factLabelingReady(lastText, lastUrl)) {
       await labelFactStatements(page, config, labelText);
