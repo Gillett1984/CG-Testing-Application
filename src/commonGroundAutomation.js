@@ -2689,15 +2689,19 @@ async function openPendingWorkflowStep(page, options = {}) {
 
   // Callers may ask for one specific step (the Missing Perspective handler does),
   // so opening it can never wander into a different pending step by accident.
-  const candidates = options.only ? ordered.filter((step) => step.key === options.only) : ordered;
+  const stepsToTry = options.only ? ordered.filter((step) => step.key === options.only) : ordered;
 
   const settle = async () => {
     await page.waitForLoadState('networkidle').catch(() => {});
     await page.waitForTimeout(2500);
   };
 
-  for (const step of candidates) {
-    const named = step.name.test(pointer || '');
+  for (const step of stepsToTry) {
+    // Our own outstanding row is reason enough to try the route. Gating this on
+    // the pointer meant a step we KNEW was ours went unopened whenever the app
+    // was pointing at the counterpart instead - which is the normal state while
+    // the other party still has work (CG-0188).
+    const named = step.name.test(pointer || '') || wanted.has(step.key);
     const candidates = [];
     for (const role of ['link', 'button']) {
       candidates.push(...await page.getByRole(role, { name: step.name }).all().catch(() => []));
@@ -2737,6 +2741,14 @@ async function openPendingWorkflowStep(page, options = {}) {
     await settle();
   }
 
+  // A step we know is ours and could not open is a real problem; say so before
+  // the "waiting on the counterpart" branch swallows it, because the pointer
+  // naming the other party is the normal state while this happens.
+  if (options.only && wanted.has(options.only)) {
+    console.warn(`[workflow] "${options.only}" is outstanding for us but could not be opened `
+      + `(pointer: "${pointer || 'none'}", url: ${page.url()}).`);
+    return false;
+  }
   if (pointer && pointerNamesOtherParty(pointer)) {
     // Waiting on the counterpart is a normal state, not a failure to navigate.
     return false;
