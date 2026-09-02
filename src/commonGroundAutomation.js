@@ -532,6 +532,31 @@ async function runFullWorkflow({ browser, config, store, artifacts, syntheticCas
   await participantPage.screenshot({ path: `${store.runDir}/participant-post-processing.png`, fullPage: true });
   await participantPage.close();
 
+  // Missing Perspective does not exist yet when its owner hands off. It is built
+  // from the pair diff, so the participant's own row only appears once BOTH sides
+  // have finished - by which time the tool has moved to the requestor and never
+  // returns. Her hand-off sweep is telling the truth when it finds nothing; the
+  // step simply had not been created.
+  //
+  // The requestor's cross-rating then 409s behind it and the case parks on
+  // "Next: Esha adds missing perspective" until the refresh budget runs out
+  // (CG-0187 and CG-0188, both clean runs). Go back and clear it before rating,
+  // rather than discovering the gate from the wrong side of it.
+  if (!skipPhase('requestor_rates_participant', 'Participant Late Steps')) {
+    const participantLatePage = await sessionContext.newPage();
+    try {
+      await login(participantLatePage, config, 'participant', store);
+      await openCaseAsParticipant(participantLatePage, config, artifacts.case, syntheticCase);
+      await settleOutstandingOwnSteps(participantLatePage, config, artifacts, 'Participant');
+    } catch (error) {
+      // Never fatal: if nothing was outstanding this pass had nothing to do, and
+      // the rating below reports the real problem if one remains.
+      console.warn('[workflow] Participant late-step pass did not complete: ' + String(error).slice(0, 120));
+    } finally {
+      await participantLatePage.close().catch(() => {});
+    }
+  }
+
   // Step 9: Requestor rates the participant's facts.
   if (!skipPhase('requestor_rates_participant', 'Requestor Rates Participant Facts')) {
   recordStage(artifacts, 'Requestor Rates Participant Facts', 'started');
