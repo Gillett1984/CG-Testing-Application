@@ -279,3 +279,29 @@ assert.ok(!generating('Review & Approve Excerpts 12/12 approved Submit'),
   'the excerpt step must not look like a clarify placeholder');
 
 console.log('Generation placeholders: the clarify step is waited out, a rendered step is not.');
+
+// A completed step still renders, still links, still shows its controls - the
+// app just marks it read-only. Opening one must not count as opening the
+// pending step: CG-0186 landed on a finished cross-rate screen from the
+// dashboard and tried to re-rate 12 already-submitted statements.
+//
+// Read the predicate out of the engine itself rather than restating it here, so
+// this cannot pass against a copy while the shipped regex is broken.
+const engineSrc = fs.readFileSync(path.join(rootDir, 'src/commonGroundAutomation.js'), 'utf8');
+const doneFn = engineSrc.match(/function stepIsAlreadyDone\(text\) \{[\s\S]*?\n\}/);
+assert.ok(doneFn, 'stepIsAlreadyDone must exist in the engine');
+const stepIsAlreadyDone = new Function('text',
+  doneFn[0].replace(/^function stepIsAlreadyDone\(text\) \{/, '').replace(/\}$/, ''));
+
+for (const [label, expected, text] of [
+  ['finished cross-rate', true,
+    'These statements have already been rated for this discussion. This screen is view-only. 12/12 rated Submitted'],
+  ['all rated + submitted', true, 'Statement 1 12/12 rated Submitted'],
+  ['fresh cross-rate', false, 'Statement 1 Confident Fact Likely Fact 0/12 rated Submit'],
+  ['partially rated', false, 'Statement 1 Confident Fact 5/12 rated Submitted'],
+  ['clarify step', false, 'Clarify & Improve Helpful Detail 1 Skip Save Detail Submit & Continue']
+]) {
+  assert.equal(stepIsAlreadyDone(text), expected, `${label} classified wrongly`);
+}
+
+console.log('Completed-step guard: a finished, view-only step is never mistaken for a pending one.');

@@ -2565,6 +2565,18 @@ function pointerNamesOtherParty(pointer) {
   return /^\S+\s+(?:adds?|shares?|rates?|reviews?|confirms?|completes?)\b/i.test(value);
 }
 
+// A step that has already been completed still renders, still has a link, and
+// still shows its controls - Common Ground just marks it read-only ("These
+// statements have already been rated for this discussion. This screen is
+// view-only.", beside a spent "Submitted" and a full "12/12 rated"). Acting on
+// one wastes the wait and reports a failure that is not real (CG-0186 tried to
+// re-rate a finished cross-rate screen), so opening it must not count.
+function stepIsAlreadyDone(text) {
+  const value = String(text ?? '');
+  if (/this screen is view[- ]only|already been rated for this discussion/i.test(value)) return true;
+  return /\b(\d+)\s*\/\s*\1\s+rated\b/i.test(value) && /\bSubmitted\b/.test(value);
+}
+
 // Open whichever workflow step the case page is pointing at.
 //
 // Driven by the app's own "Next:" pointer rather than by trying steps in a
@@ -2583,13 +2595,23 @@ function pointerNamesOtherParty(pointer) {
 async function openPendingWorkflowStep(page) {
   if (PENDING_STEP_LINKS.some((step) => step.route.test(page.url()))) return false;
 
+  // The dashboard carries no status list and no "Next:" pointer. Guessing from
+  // there is how a resumed run walked into an already-rated, view-only
+  // cross-rate screen and then tried to rate it (CG-0186). Callers open the
+  // case first; from the dashboard there is nothing to open.
+  if (isDashboardPage(page.url(), await readVisibleBodyText(page))) return false;
+
   const caseBase = page.url().replace(/[?#].*$/, '').replace(/\/+$/, '');
   const pointer = await readPendingStepLabel(page);
-  // Whatever the app says is next comes first; the rest stay as fallbacks for
-  // pages that render no pointer.
-  const ordered = pointer
-    ? [...PENDING_STEP_LINKS].sort((a, b) => Number(b.name.test(pointer)) - Number(a.name.test(pointer)))
-    : PENDING_STEP_LINKS;
+
+  // Drive from what the app says is next, or do not drive at all. Without a
+  // pointer nothing distinguishes a step still waiting for us from one already
+  // finished - every completed step keeps rendering its link - so the old blind
+  // sweep through all four could only ever guess.
+  if (!pointer) return false;
+
+  const ordered = [...PENDING_STEP_LINKS]
+    .sort((a, b) => Number(b.name.test(pointer)) - Number(a.name.test(pointer)));
 
   const settle = async () => {
     await page.waitForLoadState('networkidle').catch(() => {});
@@ -2615,6 +2637,11 @@ async function openPendingWorkflowStep(page) {
       if (!await control.click({ timeout: 10000 }).then(() => true).catch(() => false)) continue;
       await settle();
       if (!step.route.test(page.url())) continue;
+      if (stepIsAlreadyDone(await readVisibleBodyText(page))) {
+        await page.goto(caseBase, { waitUntil: 'domcontentloaded' }).catch(() => {});
+        await settle();
+        continue;
+      }
       console.log('[workflow] Opened "' + (pointer || 'the pending step') + '" -> ' + page.url());
       return true;
     }
