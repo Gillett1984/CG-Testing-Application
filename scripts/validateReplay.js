@@ -260,3 +260,22 @@ for (const [label, expected] of [
 }
 
 console.log('Pointer ownership: own steps, counterpart rows and unknown labels each classified correctly.');
+
+// Generation placeholders must never be mistaken for a broken step. The clarify
+// step renders its chrome before its questions exist and says so - with no
+// "Loading" anywhere in the text, which is what the render wait keyed on. That
+// cost CG-0186 a failed stage on a step that had simply not finished generating.
+const generating = (t) => /preparing a few questions|preparing your questions|this runs right after your conversation/i
+  .test(String(t ?? ''));
+
+const clarifyStillPreparing = 'Clarify & Improve CG-0186 Performance Review: Focused Improvement '
+  + 'Clarify & Improve Add Missing Perspective Excerpt Review Statements '
+  + 'Preparing a few questions… This runs right after your conversation. It only takes a moment.';
+
+assert.ok(generating(clarifyStillPreparing), 'the clarify generation placeholder must be recognised');
+assert.ok(!generating('Clarify & Improve Helpful Detail 1 Skip Save Detail Submit & Continue 0/3 reviewed'),
+  'a rendered clarify step must not look like a placeholder');
+assert.ok(!generating('Review & Approve Excerpts 12/12 approved Submit'),
+  'the excerpt step must not look like a clarify placeholder');
+
+console.log('Generation placeholders: the clarify step is waited out, a rendered step is not.');

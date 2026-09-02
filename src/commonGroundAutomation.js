@@ -2643,10 +2643,27 @@ async function openPendingWorkflowStep(page) {
 // Poll until the clarify step's own UI is on screen — a card, the "N/M reviewed" counter, or
 // the Submit & Continue button — and the page is not still a bare "Loading…" shell.
 // Returns what it found, or null if the step never rendered in time.
+// The clarify step renders its chrome before its questions exist: Common Ground
+// shows "Preparing a few questions... This runs right after your conversation.
+// It only takes a moment." while it builds them from the interview transcript.
+//
+// That text contains no "Loading", so the render wait below read it as a dead
+// page and gave up after 60s, failing a step that had simply not finished
+// generating (CG-0186). Same shape as factStatementsGenerating, and treated the
+// same way: visible work rolls the deadline forward instead of ending it.
+function clarifyQuestionsGenerating(text) {
+  const value = String(text ?? '');
+  return /preparing a few questions|preparing your questions|this runs right after your conversation/i.test(value);
+}
+
 async function waitForClarifyStepRendered(page, timeoutMs = 60000) {
-  const deadline = Date.now() + timeoutMs;
+  const startedAt = Date.now();
+  // A visibly-working page may extend the wait, but never past this.
+  const hardStop = startedAt + Math.max(timeoutMs, 420000);
+  let deadline = startedAt + timeoutMs;
   let last = null;
-  while (Date.now() < deadline) {
+  let announcedGenerating = false;
+  while (Date.now() < deadline && Date.now() < hardStop) {
     await dismissTourOverlay(page, 'clarify step render');
     last = await page.evaluate(() => {
       const norm = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -2659,11 +2676,28 @@ async function waitForClarifyStepRendered(page, timeoutMs = 60000) {
         hasSubmit,
         // A shell that is only chrome + "Loading…" is not the step.
         stillLoading: /\bLoading\b/i.test(text) && text.length < 400,
+        text,
         textLength: text.length
       };
     }).catch(() => null);
 
+
+    // Still being generated: the app is working, so keep waiting rather than
+    // calling an ungenerated step a broken one.
+    if (last && clarifyQuestionsGenerating(last.text)) {
+      if (!announcedGenerating) {
+        console.log('[clarify-context] The app is still preparing the questions; waiting for them.');
+        announcedGenerating = true;
+      }
+      deadline = Math.min(hardStop, Date.now() + 60000);
+      await page.waitForTimeout(2000);
+      continue;
+    }
+
     if (last && !last.stillLoading && (last.hasCards || last.hasCounter || last.hasSubmit)) {
+      if (announcedGenerating) {
+        console.log(`[clarify-context] Questions ready after ${Math.round((Date.now() - startedAt) / 1000)}s.`);
+      }
       return last;
     }
     await page.waitForTimeout(1000);
@@ -4401,6 +4435,8 @@ function isProcessingState(text) {
   // deadline forward like any other — otherwise a slow generation trips the fixed
   // post-processing timeout while the app is visibly still working.
   if (factStatementsGenerating(value)) return true;
+  // The clarify step's own generation placeholder, for the same reason.
+  if (clarifyQuestionsGenerating(value)) return true;
   // Partner AI's between-turn states. While any of these show, the composer is removed or
   // disabled, so every wait loop must keep waiting rather than treat it as a dead page.
   if (/making sure there'?s enough|enough here to go on|reviewing your (?:response|answer)|checking your (?:response|answer)/i.test(value)) return true;
