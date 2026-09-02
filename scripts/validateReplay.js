@@ -365,7 +365,7 @@ console.log('Engine import: module loads cleanly.');
 // was pending - so a rule requiring the pointer to name one of our steps refused
 // to open a step that was genuinely ours and waiting. The status list is the
 // authority on that; the pointer only orders which of ours to try first.
-const openerSrc = engineSrc2.match(/async function openPendingWorkflowStep\(page\) \{[\s\S]*?\n\}/);
+const openerSrc = engineSrc2.match(/async function openPendingWorkflowStep\([^)]*\) \{[\s\S]*?\n\}/);
 assert.ok(openerSrc, 'openPendingWorkflowStep must exist');
 assert.ok(/readWorkflowStatusList/.test(openerSrc[0]),
   'the opener must consult the status list, not the pointer alone');
@@ -375,3 +375,20 @@ assert.ok(/isDashboardPage/.test(openerSrc[0]), 'the dashboard guard must remain
 assert.ok(/stepIsAlreadyDone/.test(openerSrc[0]), 'the completed-step guard must remain');
 
 console.log('Opener authority: outstanding rows drive it, the pointer only orders them.');
+
+// There must be exactly ONE place that knows how to open a workflow step. A
+// second, naive copy inside the Missing Perspective handler matched a control
+// literally named "Add Missing Perspective" - which does not exist, since the
+// row's only clickable element is called "View" - so the step read as absent
+// and the counterpart's cross-rating waited behind it (CG-0188). That is the
+// same bug already fixed in the shared opener, surviving in a duplicate.
+const mpIfPresent = engineSrc2.match(/async function completeMissingPerspectiveIfPresent\([^)]*\) \{[\s\S]*?\n\}/);
+assert.ok(mpIfPresent, 'completeMissingPerspectiveIfPresent must exist');
+assert.ok(/openPendingWorkflowStep\(page, \{ only: 'missing_perspective' \}\)/.test(mpIfPresent[0]),
+  'it must delegate to the shared opener, restricted to its own step');
+assert.ok(!/getByRole\([^)]*Add Missing Perspective/.test(mpIfPresent[0]),
+  'it must not carry its own control lookup');
+assert.ok(/options\.only \? ordered\.filter/.test(engineSrc2),
+  'the shared opener must honour an "only" restriction so it cannot wander into another step');
+
+console.log('Step opening: one implementation, and the MP handler defers to it.');

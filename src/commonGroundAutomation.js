@@ -2581,21 +2581,23 @@ async function completeConfirmAdditionsIfPresent(page, artifacts, actorLabel) {
 // Open and complete the Missing Perspective step when the current page offers
 // it (its tab/link, or already on its route). Returns { handled: false } when
 // the step is not reachable from here.
+// Open the actor's Missing Perspective step if it is theirs to do, then complete it.
+//
+// This used to look for a control literally named "Add Missing Perspective".
+// No such control exists: the status row shows that text, but the only
+// clickable element inside it is called "View". The step therefore read as
+// absent, was never opened, and the counterpart's cross-rating waited behind
+// the unsubmitted step until its refresh budget ran out (CG-0188) - the very
+// bug already fixed in openPendingWorkflowStep, living on in a second copy.
+//
+// Delegate to that opener instead, restricted to this step, so there is one
+// place that knows the affordances: a control named after the step, the row's
+// "View" control, and finally the step's own route.
 async function completeMissingPerspectiveIfPresent(page, artifacts, actorLabel) {
-  if (!/\/missing-perspective(?:[/?#]|$)/i.test(page.url())) {
-    let opened = false;
-    for (const role of ['link', 'button']) {
-      const control = page.getByRole(role, { name: /Add Missing Perspective/i }).first();
-      if (!await control.isVisible({ timeout: 750 }).catch(() => false)) continue;
-      if (!await control.isEnabled({ timeout: 500 }).catch(() => false)) continue;
-      await control.scrollIntoViewIfNeeded().catch(() => {});
-      if (!await control.click({ timeout: 5000 }).then(() => true).catch(() => false)) continue;
-      opened = true;
-      break;
-    }
-    if (!opened) return { handled: false, mode: 'absent' };
-    await page.waitForLoadState('networkidle').catch(() => {});
-    await page.waitForTimeout(2000);
+  const onStep = () => /\/missing-perspective(?:[/?#]|$)/i.test(page.url());
+  if (!onStep()) {
+    await openPendingWorkflowStep(page, { only: 'missing_perspective' });
+    if (!onStep()) return { handled: false, mode: 'absent' };
   }
   return completeMissingPerspectiveStep(page, artifacts, actorLabel);
 }
@@ -2651,7 +2653,7 @@ function stepIsAlreadyDone(text) {
 // candidate. CG-0183 stalled for ten minutes on "Next: Add Missing
 // Perspective" because the sole actionable control in that row is called
 // "View", so matching on the step's name alone found nothing to click at all.
-async function openPendingWorkflowStep(page) {
+async function openPendingWorkflowStep(page, options = {}) {
   if (PENDING_STEP_LINKS.some((step) => step.route.test(page.url()))) return false;
 
   // The dashboard carries no status list and no "Next:" pointer. Guessing from
@@ -2685,12 +2687,16 @@ async function openPendingWorkflowStep(page) {
     .sort((a, b) => (Number(b.name.test(pointer)) - Number(a.name.test(pointer)))
       || (Number(wanted.has(b.key)) - Number(wanted.has(a.key))));
 
+  // Callers may ask for one specific step (the Missing Perspective handler does),
+  // so opening it can never wander into a different pending step by accident.
+  const candidates = options.only ? ordered.filter((step) => step.key === options.only) : ordered;
+
   const settle = async () => {
     await page.waitForLoadState('networkidle').catch(() => {});
     await page.waitForTimeout(2500);
   };
 
-  for (const step of ordered) {
+  for (const step of candidates) {
     const named = step.name.test(pointer || '');
     const candidates = [];
     for (const role of ['link', 'button']) {
