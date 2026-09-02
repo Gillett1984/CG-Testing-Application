@@ -2011,6 +2011,19 @@ async function factStatementsAlreadySubmitted(page) {
   }).catch(() => false);
 }
 
+// Whether one of THIS actor's status rows already reads complete on the live
+// case. Read from the case detail page, which is the only screen carrying the
+// status list; a step screen shows tabs instead. Returns false on any doubt, so
+// an unreadable page makes the caller do the work rather than skip it.
+async function ownStatusStepIsComplete(page, config, artifacts, stepKey) {
+  const opened = await openCaseDetailsFromDashboard(page, artifacts.case, config.run.caseType)
+    .then(() => true).catch(() => false);
+  if (!opened) return false;
+  await waitForIdle(page);
+  const rows = await readWorkflowStatusList(page).catch(() => []);
+  return rows.some((row) => row.person === 'you' && row.key === stepKey && row.status === 'complete');
+}
+
 async function completeActorPostProcessing(page, config, artifacts, actorLabel, labelText = config.run.scenarioFoundation.topic.workflow.factStatementLabel) {
   await assertNoBlockingStageFailure(page, artifacts, `${actorLabel} post-processing`);
   // Discussion Details does not auto-advance: it parks on a status list with a
@@ -2120,13 +2133,23 @@ async function completeActorPostProcessing(page, config, artifacts, actorLabel, 
     );
   }
 
-  recordStage(artifacts, `${actorLabel} Fact Statement Labels`, 'started');
-  await waitForWorkflowState(page, config, {
-    name: `${actorLabel.toLowerCase()} fact statement labeling`,
-    ready: (text, currentPage) => factLabelingReady(text, currentPage.url())
-  });
-  await labelFactStatements(page, config, labelText);
-  recordStage(artifacts, `${actorLabel} Fact Statement Labels`, 'passed', `All fact statements labeled ${labelText} and submitted.`);
+  // The step may already be done. A resumed run re-enters this path after the
+  // labels were submitted in an earlier session, and the wait then polls for a
+  // screen that is never coming back - CG-0187 spent its whole ten minutes here
+  // while the status list already showed the step complete. Excerpt Review has
+  // recognised its own completed state for a while; this had no equivalent.
+  if (await ownStatusStepIsComplete(page, config, artifacts, 'fact_rating')) {
+    console.log(`[fact-labels] ${actorLabel}: statements are already labelled and submitted; moving on.`);
+    recordStage(artifacts, `${actorLabel} Fact Statement Labels`, 'passed', 'Already complete on the live case.');
+  } else {
+    recordStage(artifacts, `${actorLabel} Fact Statement Labels`, 'started');
+    await waitForWorkflowState(page, config, {
+      name: `${actorLabel.toLowerCase()} fact statement labeling`,
+      ready: (text, currentPage) => factLabelingReady(text, currentPage.url())
+    });
+    await labelFactStatements(page, config, labelText);
+    recordStage(artifacts, `${actorLabel} Fact Statement Labels`, 'passed', `All fact statements labeled ${labelText} and submitted.`);
+  }
 
   // Before handing off to the other actor, settle any of THIS actor's steps that
   // are still outstanding. The workflow order is not fixed: Missing Perspective
