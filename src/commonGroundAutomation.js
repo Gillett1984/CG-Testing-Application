@@ -2541,6 +2541,30 @@ async function completeMissingPerspectiveIfPresent(page, artifacts, actorLabel) 
   return completeMissingPerspectiveStep(page, artifacts, actorLabel);
 }
 
+// Whether the case page's "Next:" pointer names one of THIS actor's steps.
+// The `own` patterns are anchored, so they identify a step label exactly and
+// will not be satisfied by a counterpart row that merely contains the words.
+function pointerNamesOwnStep(pointer) {
+  const value = String(pointer ?? '').trim();
+  return Object.values(WORKFLOW_STEP_LABELS).some((step) => step.own && step.own.test(value));
+}
+
+// Whether it names the counterpart's step instead. There is nothing for this
+// actor to open in that case, so failing to open it is the expected outcome and
+// not worth a warning.
+//
+// The `other` patterns alone are not enough: they are unanchored, so
+// "adds? missing perspective" also matches our own "Add Missing Perspective",
+// and none of them cover "Esha rates YOUR supporting statements". Own-step
+// labels are therefore excluded first, and a counterpart row is recognised by
+// its shape - a name followed by a third-person verb.
+function pointerNamesOtherParty(pointer) {
+  const value = String(pointer ?? '').trim();
+  if (!value || pointerNamesOwnStep(value)) return false;
+  if (Object.values(WORKFLOW_STEP_LABELS).some((step) => step.other && step.other.test(value))) return true;
+  return /^\S+\s+(?:adds?|shares?|rates?|reviews?|confirms?|completes?)\b/i.test(value);
+}
+
 // Open whichever workflow step the case page is pointing at.
 //
 // Driven by the app's own "Next:" pointer rather than by trying steps in a
@@ -2608,6 +2632,10 @@ async function openPendingWorkflowStep(page) {
     await settle();
   }
 
+  if (pointer && pointerNamesOtherParty(pointer)) {
+    // Waiting on the counterpart is a normal state, not a failure to navigate.
+    return false;
+  }
   if (pointer) console.warn('[workflow] Could not open the step the case page points at: "' + pointer + '".');
   return false;
 }
@@ -3152,6 +3180,7 @@ async function waitForWorkflowState(page, config, { name, ready }) {
   let lastText = '';
   let lastUrl = page.url();
   let gateSince = 0;
+  let lastNudgeAt = 0;
 
   while (Date.now() < deadline) {
     await dismissTourOverlay(page, name);
@@ -3161,6 +3190,16 @@ async function waitForWorkflowState(page, config, { name, ready }) {
       elapsedMs: Date.now() - startedAt,
       url: lastUrl
     };
+
+    // Discussion Details does not advance on its own: it parks on a status list
+    // whose "Next:" pointer has to be clicked. Polling here without opening
+    // anything is how CG-0186 spent ten minutes beside "Next: Add Clarity".
+    // Throttled, because a step page is not reached in one tick.
+    if (Date.now() - lastNudgeAt >= 10000) {
+      lastNudgeAt = Date.now();
+      if (await recoverFromFailedPostProcessing(page, name)) continue;
+      if (await openPendingWorkflowStep(page)) continue;
+    }
     // This step is gated on the other actor's progress and will never become ready
     // in this session; bail out (once the gate has persisted) so the caller can hand
     // off rather than polling to the full postCompletionWaitMs timeout.

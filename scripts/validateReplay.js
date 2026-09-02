@@ -228,3 +228,35 @@ const casePage = 'https://example.test/cases/abc123';
 assert.ok(!steps.some((s) => s.route.test(casePage)), 'case page must not match any step route');
 
 console.log(`Pending-step navigation: pointer read, ${steps.length} steps each verifiable by route and reachable by path.`);
+
+// A "Next:" pointer naming the counterpart's step is a normal waiting state, not
+// a navigation failure. Telling the two apart is subtle enough to pin down: the
+// `other` patterns are unanchored, so "adds? missing perspective" also matches
+// our own "Add Missing Perspective", and none of them cover "Esha rates YOUR
+// supporting statements". An unrecognised label must stay on the "ours" side so
+// a rename still surfaces as a warning rather than being silently swallowed.
+const ownStep = (p) => Object.values(WORKFLOW_STEP_LABELS)
+  .some((s) => s.own && s.own.test(String(p ?? '').trim()));
+const otherParty = (p) => {
+  const v = String(p ?? '').trim();
+  if (!v || ownStep(v)) return false;
+  if (Object.values(WORKFLOW_STEP_LABELS).some((s) => s.other && s.other.test(v))) return true;
+  return /^\S+\s+(?:adds?|shares?|rates?|reviews?|confirms?|completes?)\b/i.test(v);
+};
+
+for (const [label, expected] of [
+  ['Esha rates your supporting statements', true],
+  ['Rabia adds missing perspective', true],
+  ['Rabia shares their perspective', true],
+  ['Esha reviews their excerpts', true],
+  ['Add Clarity', false],
+  ['Add Missing Perspective', false],
+  ['Review & Approve Excerpts', false],
+  ['Rate Foundational Statements', false],
+  ['Share Your Perspective', false],
+  ['Contribute Missing Context', false]
+]) {
+  assert.equal(otherParty(label), expected, `"${label}" classified wrongly`);
+}
+
+console.log('Pointer ownership: own steps, counterpart rows and unknown labels each classified correctly.');
