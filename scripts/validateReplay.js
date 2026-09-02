@@ -174,3 +174,57 @@ assert.ok(/do NOT manufacture favourable/i.test(misaligned), 'A negative stance 
 assert.ok(/purely identifying/i.test(misaligned), 'A negative stance must still state undisputed identifying facts so the interview can progress.');
 assert.ok(/expected for Partner AI to ask a follow-up/i.test(misaligned), 'A negative stance must treat follow-ups as expected behaviour under test.');
 console.log(`Coverage targeting: aimed at ${mandatoryCount} scored mandatory criteria; aligned completes in one turn, misaligned expects follow-ups.`);
+
+// ---------------------------------------------------------------------------
+// Pending-step navigation.
+//
+// The case page names its next step in a "Next:" pointer, but the status row
+// for that step does not name its own control: the row reads "Add Missing
+// Perspective" while the only clickable thing inside it is called "View".
+// Matching a control by the step's name therefore finds nothing to click, and
+// CG-0183 sat on that page for ten minutes reporting the step unreachable.
+//
+// Replayed here against the exact page text that stalled it, so a future
+// relabelling shows up in three seconds instead of a ten-minute timeout.
+const { WORKFLOW_STEP_LABELS, WORKFLOW_STEP_PATHS } = await import('../src/workflowLabels.js');
+
+const stalledPage = "Discussion Details CG-0183 Performance Review: Focused Improvement Active "
+  + "Manager: Esha Employee: Rabia Next:Add Missing Perspective Details Reports Notifications 7 "
+  + "Status Review Rabia's Invitation Rabia shares their perspective Add Missing Perspective View "
+  + "Review & Approve Excerpts View Rate Foundational Statements View";
+
+// Same expression the engine uses to read the pointer.
+const readPointer = (text) => {
+  const m = String(text).replace(/\s+/g, ' ').match(/Next:\s*([^.]{3,60}?)(?:\s{2,}|Details|Reports|Status|$)/i);
+  return m ? m[1].trim() : '';
+};
+
+const pointer = readPointer(stalledPage);
+assert.equal(pointer, 'Add Missing Perspective', `pointer misread as "${pointer}"`);
+
+const stepKeys = ['clarify_context', 'missing_perspective', 'excerpt_review', 'fact_rating'];
+const steps = stepKeys.map((key) => ({
+  key,
+  name: WORKFLOW_STEP_LABELS[key].link,
+  route: WORKFLOW_STEP_LABELS[key].route,
+  path: WORKFLOW_STEP_PATHS[key]
+}));
+
+const ordered = [...steps].sort((a, b) => Number(b.name.test(pointer)) - Number(a.name.test(pointer)));
+assert.equal(ordered[0].key, 'missing_perspective', 'the pointed-at step must be tried first');
+
+// Every step the engine may open must have a route it can verify landing on,
+// and a path it can navigate to when no control matches.
+for (const step of steps) {
+  assert.ok(step.route, `${step.key} has no route to verify arrival`);
+  assert.ok(step.path, `${step.key} has no path to fall back to`);
+  const target = `https://example.test/cases/abc123/${step.path}`;
+  assert.ok(step.route.test(target), `${step.key} route does not accept its own path (${target})`);
+}
+
+// The case page itself must not look like a step route, or the opener
+// short-circuits and never navigates anywhere.
+const casePage = 'https://example.test/cases/abc123';
+assert.ok(!steps.some((s) => s.route.test(casePage)), 'case page must not match any step route');
+
+console.log(`Pending-step navigation: pointer read, ${steps.length} steps each verifiable by route and reachable by path.`);
