@@ -64,6 +64,12 @@ export const WORKFLOW_STEP_LABELS = {
 export const WORKFLOW_STATUS_STEP_KEYS = [
   'share_perspective',
   'clarify_context',
+  // Missing Perspective belongs here even though it is the newest row. Leaving
+  // it out meant the status list was never parsed for it, so an actor whose
+  // other four steps were done read as "everything complete" and handed off
+  // with Missing Perspective still open - which 409-gates the counterpart's
+  // cross-rating forever (CG-0187).
+  'missing_perspective',
   'excerpt_review',
   'fact_rating'
 ];

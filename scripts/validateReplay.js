@@ -305,3 +305,35 @@ for (const [label, expected, text] of [
 }
 
 console.log('Completed-step guard: a finished, view-only step is never mistaken for a pending one.');
+
+// Missing Perspective must be a parsed status row, or an actor whose other four
+// steps are done reads as finished and hands off with it still open - which
+// 409-gates the counterpart's cross-rating forever (CG-0187, where neither
+// party's Missing Perspective ever fired on a clean run).
+const { WORKFLOW_STATUS_STEP_KEYS } = await import('../src/workflowLabels.js');
+assert.ok(WORKFLOW_STATUS_STEP_KEYS.includes('missing_perspective'),
+  'missing_perspective must be a parsed status row');
+assert.ok(
+  WORKFLOW_STATUS_STEP_KEYS.indexOf('clarify_context') < WORKFLOW_STATUS_STEP_KEYS.indexOf('missing_perspective')
+  && WORKFLOW_STATUS_STEP_KEYS.indexOf('missing_perspective') < WORKFLOW_STATUS_STEP_KEYS.indexOf('excerpt_review'),
+  'missing_perspective must sit between clarify and excerpt review, matching the app'
+);
+for (const key of WORKFLOW_STATUS_STEP_KEYS) {
+  assert.ok(WORKFLOW_STEP_LABELS[key]?.own && WORKFLOW_STEP_LABELS[key]?.other,
+    `${key} needs both own and other patterns to be read as a status row`);
+}
+
+// An in-progress Missing Perspective is a real gate, not a stale spinner, so the
+// out-of-order rule must never skip past it the way it does for other rows.
+const engineSrc2 = fs.readFileSync(path.join(rootDir, 'src/commonGroundAutomation.js'), 'utf8');
+const ooo = engineSrc2.match(/function findOutOfOrderStatus\(rows\) \{[\s\S]*?\n\}/);
+assert.ok(ooo, 'findOutOfOrderStatus must exist');
+assert.ok(/stalled\.key === 'missing_perspective'/.test(ooo[0]),
+  'findOutOfOrderStatus must refuse to skip an in-progress missing_perspective');
+
+// Handing off must also respect the app's own pointer, not just the row count.
+assert.ok(/const stillOurs = pointerNamesOwnStep\(await readPendingStepLabel\(page\)\)/.test(engineSrc2)
+  && /if \(!stillOurs && ownStatus\.length >= WORKFLOW_STATUS_STEPS\.length/.test(engineSrc2),
+  'the "all my steps are complete" short-circuit must also check the pending-step pointer');
+
+console.log(`Status rows: ${WORKFLOW_STATUS_STEP_KEYS.length} steps parsed, missing perspective gated and never skipped.`);

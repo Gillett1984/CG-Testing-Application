@@ -2038,7 +2038,11 @@ async function completeActorPostProcessing(page, config, artifacts, actorLabel, 
   // supporting statements".
   const ownStatus = (await readWorkflowStatusList(page).catch(() => []))
     .filter((row) => row.person === 'you');
-  if (ownStatus.length >= WORKFLOW_STATUS_STEPS.length && ownStatus.every((row) => row.status === 'complete')) {
+  // The row count and the pointer are checked together: a variant that renders
+  // no row for a step would otherwise read as complete, and the app's own
+  // "Next:" pointer is the authority on whether anything is still ours.
+  const stillOurs = pointerNamesOwnStep(await readPendingStepLabel(page));
+  if (!stillOurs && ownStatus.length >= WORKFLOW_STATUS_STEPS.length && ownStatus.every((row) => row.status === 'complete')) {
     const summary = ownStatus.map((row) => row.label).join(', ');
     console.log(`[workflow] ${actorLabel}: every own post-processing step is already complete (${summary}); moving on.`);
     recordStage(artifacts, `${actorLabel} Post-Processing`, 'passed', `Already complete on the live case: ${summary}.`);
@@ -3509,6 +3513,11 @@ function findOutOfOrderStatus(rows) {
     for (let index = 0; index < sorted.length; index += 1) {
       const stalled = sorted[index];
       if (stalled.status !== 'in-progress') continue;
+      // Never skip Missing Perspective this way. Every other row spinning behind
+      // a completed later step is a stale tracker; an in-progress Missing
+      // Perspective is a REAL gate - the counterpart's cross-rating 409s until it
+      // submits (CG-0173) - so treating it as already done is how it gets lost.
+      if (stalled.key === 'missing_perspective') continue;
       const laterComplete = sorted.slice(index + 1).find((row) => row.status === 'complete');
       if (laterComplete) return { person, stalled, laterComplete };
     }
